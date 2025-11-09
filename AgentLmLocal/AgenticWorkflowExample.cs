@@ -29,29 +29,28 @@ public static class AgenticWorkflowExample
 {
     public static async Task RunExample()
     {
-        Console.WriteLine("=== Agentic Workflow Example ===\n");
-        Console.WriteLine("This example demonstrates multi-agent coordination with:");
-        Console.WriteLine("- Planner: Task decomposition into DAGs");
-        Console.WriteLine("- Executor: Step-by-step execution");
-        Console.WriteLine("- Verifier: Quality evaluation");
-        Console.WriteLine("- Recovery: Error handling");
-        Console.WriteLine("- Retriever: Knowledge augmentation\n");
+        Console.WriteLine("""
+            === Agentic Workflow Example ===
+            This example demonstrates multi-agent coordination with:
+            • Planner: Task decomposition into DAGs
+            • Executor: Step-by-step execution
+            • Verifier: Quality evaluation
+            • Recovery: Error handling
+            """);
 
-        // Set up the LLM client (using LM Studio as configured in original Program.cs)
         var endpoint = Environment.GetEnvironmentVariable("LMSTUDIO_ENDPOINT") ?? "http://localhost:1234/v1";
         var apiKey = Environment.GetEnvironmentVariable("LMSTUDIO_API_KEY") ?? "lm-studio";
         var modelId = Environment.GetEnvironmentVariable("LMSTUDIO_MODEL") ?? "openai/gpt-oss-20b";
 
-        OpenAIClient lmStudioClient = new(
-            new ApiKeyCredential(apiKey),
-            new OpenAIClientOptions
+        OpenAI.OpenAIClient lmStudioClient = new(
+            new System.ClientModel.ApiKeyCredential(apiKey),
+            new OpenAI.OpenAIClientOptions
             {
                 Endpoint = new Uri(endpoint)
             });
 
         var chatClient = lmStudioClient.GetChatClient(modelId).AsIChatClient();
 
-        // Create all the agents
         var planner = new PlannerAgent("Planner", chatClient);
         var executor = new ExecutorAgent("Executor", chatClient)
         {
@@ -67,26 +66,12 @@ public static class AgenticWorkflowExample
             MaxRetries = 3,
             EnableStateSnapshots = true
         };
-        var retriever = new RetrieverAgent("Retriever", chatClient)
-        {
-            EnableCaching = true,
-            MinimumRelevanceScore = 0.7
-        };
 
-        // Build the workflow with agent coordination
-        var workflow = new WorkflowBuilder(planner)
-            // Planner → Executor
+        var workflow = new Microsoft.Agents.AI.Workflows.WorkflowBuilder(planner)
             .AddEdge(planner, executor)
-            // Executor → Verifier
             .AddEdge(executor, verifier)
-            // Verifier → RecoveryHandler (on failure)
             .AddEdge(verifier, recoveryHandler)
-            // RecoveryHandler → Executor (retry)
             .AddEdge(recoveryHandler, executor)
-            // Executor can also call Retriever when knowledge is needed
-            .AddEdge(executor, retriever)
-            .AddEdge(retriever, executor)
-            // Set output from verifier (success path)
             .WithOutputFrom(verifier)
             .Build();
 
@@ -106,17 +91,16 @@ public static class AgenticWorkflowExample
         Console.WriteLine("\n\n=== Agentic Workflow Example Complete ===");
     }
 
-    private static async Task RunWorkflowExample(Workflow workflow, string task)
+    private static async Task RunWorkflowExample(Microsoft.Agents.AI.Workflows.Workflow workflow, string task)
     {
         Console.WriteLine($"\nTask: {task}\n");
         Console.WriteLine("Executing workflow...\n");
 
         try
         {
-            await using StreamingRun run = await InProcessExecution.StreamAsync(workflow, input: task);
-            await foreach (WorkflowEvent evt in run.WatchStreamAsync())
+            await using Microsoft.Agents.AI.Workflows.StreamingRun run = await Microsoft.Agents.AI.Workflows.InProcessExecution.StreamAsync(workflow, input: task);
+            await foreach (Microsoft.Agents.AI.Workflows.WorkflowEvent evt in run.WatchStreamAsync())
             {
-                // Display events from all agents
                 switch (evt)
                 {
                     case PlanGeneratedEvent:
@@ -124,11 +108,11 @@ public static class AgenticWorkflowExample
                     case VerificationCompletedEvent:
                     case RecoveryStrategyDeterminedEvent:
                     case RecoveryActionEvent:
-                    case RetrievalEvent:
+                    
                         Console.WriteLine($"[{evt.GetType().Name}] {evt}");
                         break;
 
-                    case WorkflowOutputEvent outputEvent:
+                    case Microsoft.Agents.AI.Workflows.WorkflowOutputEvent outputEvent:
                         Console.WriteLine($"\n>>> OUTPUT: {outputEvent}\n");
                         break;
                 }
@@ -139,7 +123,4 @@ public static class AgenticWorkflowExample
             Console.WriteLine($"\nWorkflow Error: {ex.Message}");
         }
     }
-
-    // Visualization functionality has been removed
-    // See git history if you need to restore it
 }

@@ -1,2 +1,19 @@
 bin/
 obj/
+ 
+# OS-specific files
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE and tooling
+.vs/
+*.user
+*.suo
+
+# Logs
+*.log
+logs/
