@@ -3,7 +3,6 @@
 using System.ClientModel;
 using AgentLmLocal.Events;
 using AgentLmLocal.Executors;
-using AgentLmLocal.Visualization;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -85,15 +84,11 @@ public static class Program
         };
 
         // Build the workflow by adding executors and connecting them
-        var vizRecorder = new WorkflowVisualizationRecorder(sloganWriter);
         var workflow = new WorkflowBuilder(sloganWriter)
-            .AddVisualEdge(vizRecorder, sloganWriter, feedbackProvider)
-            .AddVisualEdge(vizRecorder, feedbackProvider, sloganWriter)
-            .WithVisualOutputFrom(vizRecorder, feedbackProvider)
+            .AddEdge(sloganWriter, feedbackProvider)
+            .AddEdge(feedbackProvider, sloganWriter)
+            .WithOutputFrom(feedbackProvider)
             .Build();
-
-        // Generate workflow visualization assets (Mermaid, DOT, SVG, PNG) to aid documentation/debugging.
-        GenerateWorkflowVisualizations(vizRecorder);
 
             // Execute the workflow
             await using StreamingRun run = await InProcessExecution.StreamAsync(workflow, input: "Create a slogan for a new electric SUV that is affordable and fun to drive.");
@@ -136,18 +131,5 @@ public static class Program
             Console.Error.WriteLine($"Stack trace: {ex.StackTrace}");
             Environment.Exit(1);
         }
-    }
-
-    private static void GenerateWorkflowVisualizations(WorkflowVisualizationRecorder recorder)
-    {
-        var visualization = recorder.CreateVisualization();
-        var visualizationDirectory = Path.Combine(AppContext.BaseDirectory, "WorkflowVisualization");
-        Directory.CreateDirectory(visualizationDirectory);
-        var dotPath = visualization.SaveDot(Path.Combine(visualizationDirectory, "slogan_workflow.dot"));
-        visualization.SaveMermaid(Path.Combine(visualizationDirectory, "slogan_workflow.mmd"));
-
-        // Export optional image formats. Errors are intentionally swallowed so workflow execution output stays clean.
-        visualization.TryExportImage(dotPath, Path.Combine(visualizationDirectory, "slogan_workflow.svg"), "svg", out _);
-        visualization.TryExportImage(dotPath, Path.Combine(visualizationDirectory, "slogan_workflow.png"), "png", out _);
     }
 }

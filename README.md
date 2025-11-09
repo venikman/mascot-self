@@ -17,7 +17,6 @@ The agents alternate in a feedback loop until the slogan meets quality standards
 - **Workflow Orchestration**: Shows how to connect multiple agents in an iterative workflow
 - **Local LLM Support**: Works with LM Studio and other OpenAI-compatible endpoints
 - **Structured Outputs**: Uses JSON schema validation for reliable agent responses
-- **Workflow Visualization**: Automatically generates workflow diagrams (Mermaid, DOT, SVG, PNG)
 - **Thread-based Conversations**: Maintains conversation context within each agent
 - **Configurable Parameters**: Flexible configuration via environment variables
 
@@ -34,10 +33,6 @@ AgentLmLocal/
 ├── Models/                          # Data models
 │   ├── FeedbackResult.cs           # Feedback response schema
 │   └── SloganResult.cs             # Slogan response schema
-├── Visualization/                   # Workflow visualization
-│   ├── WorkflowBuilderExtensions.cs
-│   ├── WorkflowVisualization.cs
-│   └── WorkflowVisualizationRecorder.cs
 └── Program.cs                       # Main entry point
 ```
 
@@ -132,19 +127,6 @@ Electrify your drive - Affordable thrills, zero emissions!
 Workflow completed successfully!
 ```
 
-### Generated Artifacts
-
-The application generates workflow visualization files in:
-```
-AgentLmLocal/bin/Debug/net9.0/WorkflowVisualization/
-├── slogan_workflow.mmd    # Mermaid diagram
-├── slogan_workflow.dot    # Graphviz DOT file
-├── slogan_workflow.svg    # SVG image (requires Graphviz)
-└── slogan_workflow.png    # PNG image (requires Graphviz)
-```
-
-To generate image files, install [Graphviz](https://graphviz.org/download/).
-
 ## Configuration
 
 ### Environment Variables
@@ -227,22 +209,6 @@ ChatOptions = new()
 - Try a different model in LM Studio
 - Check LM Studio logs for model errors
 
-### Missing Visualization Images
-
-**Issue**: SVG/PNG files not generated
-
-**Solution**: Install Graphviz:
-```bash
-# Ubuntu/Debian
-sudo apt-get install graphviz
-
-# macOS
-brew install graphviz
-
-# Windows
-choco install graphviz
-```
-
 ## Development
 
 ### Building
@@ -294,4 +260,3 @@ This is a sample/demo project. For production use, consider:
 - [Microsoft.Agents.AI Documentation](https://learn.microsoft.com/en-us/dotnet/api/microsoft.agents.ai)
 - [LM Studio](https://lmstudio.ai/)
 - [.NET 9.0](https://dotnet.microsoft.com/download/dotnet/9.0)
-- [Graphviz](https://graphviz.org/)
