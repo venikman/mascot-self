@@ -1,0 +1,165 @@
+using System.Text.Json.Serialization;
+
+namespace WorkflowCustomAgentExecutorsSample.Models;
+
+/// <summary>
+/// Represents a node in a workflow DAG (Directed Acyclic Graph).
+/// </summary>
+public sealed class WorkflowNode
+{
+    [JsonPropertyName("id")]
+    public required string Id { get; set; }
+
+    [JsonPropertyName("type")]
+    public required string Type { get; set; } // "tool_call", "llm_invocation", "conditional"
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    [JsonPropertyName("dependencies")]
+    public List<string> Dependencies { get; set; } = [];
+
+    [JsonPropertyName("input_schema")]
+    public Dictionary<string, string> InputSchema { get; set; } = [];
+
+    [JsonPropertyName("output_schema")]
+    public Dictionary<string, string> OutputSchema { get; set; } = [];
+}
+
+/// <summary>
+/// Represents a complete workflow plan with nodes and their relationships.
+/// </summary>
+public sealed class WorkflowPlan
+{
+    [JsonPropertyName("task")]
+    public required string Task { get; set; }
+
+    [JsonPropertyName("nodes")]
+    public List<WorkflowNode> Nodes { get; set; } = [];
+
+    [JsonPropertyName("execution_order")]
+    public List<string> ExecutionOrder { get; set; } = [];
+
+    [JsonPropertyName("estimated_complexity")]
+    public string EstimatedComplexity { get; set; } = "medium";
+}
+
+/// <summary>
+/// Represents the result of executing a workflow step.
+/// </summary>
+public sealed class ExecutionResult
+{
+    [JsonPropertyName("node_id")]
+    public required string NodeId { get; set; }
+
+    [JsonPropertyName("status")]
+    public required string Status { get; set; } // "success", "failure", "partial"
+
+    [JsonPropertyName("output")]
+    public string Output { get; set; } = string.Empty;
+
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    [JsonPropertyName("execution_time_ms")]
+    public long ExecutionTimeMs { get; set; }
+
+    [JsonPropertyName("metadata")]
+    public Dictionary<string, object> Metadata { get; set; } = [];
+}
+
+/// <summary>
+/// Represents verification/validation feedback on an execution result.
+/// </summary>
+public sealed class VerificationResult
+{
+    [JsonPropertyName("node_id")]
+    public required string NodeId { get; set; }
+
+    [JsonPropertyName("passed")]
+    public required bool Passed { get; set; }
+
+    [JsonPropertyName("quality_score")]
+    public int QualityScore { get; set; } // 1-10
+
+    [JsonPropertyName("feedback")]
+    public string Feedback { get; set; } = string.Empty;
+
+    [JsonPropertyName("suggestions")]
+    public List<string> Suggestions { get; set; } = [];
+
+    [JsonPropertyName("requires_rollback")]
+    public bool RequiresRollback { get; set; }
+}
+
+/// <summary>
+/// Represents a recovery strategy for handling failures.
+/// </summary>
+public sealed class RecoveryStrategy
+{
+    [JsonPropertyName("error_type")]
+    public required string ErrorType { get; set; }
+
+    [JsonPropertyName("root_cause")]
+    public string RootCause { get; set; } = string.Empty;
+
+    [JsonPropertyName("recovery_action")]
+    public required string RecoveryAction { get; set; } // "retry", "rollback", "skip", "escalate"
+
+    [JsonPropertyName("state_restoration_needed")]
+    public bool StateRestorationNeeded { get; set; }
+
+    [JsonPropertyName("alternative_path")]
+    public List<string>? AlternativePath { get; set; }
+}
+
+/// <summary>
+/// Represents a retrieval query for external knowledge systems.
+/// </summary>
+public sealed class RetrievalQuery
+{
+    [JsonPropertyName("query")]
+    public required string Query { get; set; }
+
+    [JsonPropertyName("context")]
+    public string Context { get; set; } = string.Empty;
+
+    [JsonPropertyName("max_results")]
+    public int MaxResults { get; set; } = 5;
+
+    [JsonPropertyName("knowledge_source")]
+    public string KnowledgeSource { get; set; } = "default";
+}
+
+/// <summary>
+/// Represents retrieved knowledge from external systems.
+/// </summary>
+public sealed class RetrievedKnowledge
+{
+    [JsonPropertyName("query")]
+    public required string Query { get; set; }
+
+    [JsonPropertyName("results")]
+    public List<KnowledgeItem> Results { get; set; } = [];
+
+    [JsonPropertyName("confidence")]
+    public double Confidence { get; set; }
+}
+
+/// <summary>
+/// Represents a single knowledge item retrieved from external sources.
+/// </summary>
+public sealed class KnowledgeItem
+{
+    [JsonPropertyName("content")]
+    public required string Content { get; set; }
+
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = string.Empty;
+
+    [JsonPropertyName("relevance_score")]
+    public double RelevanceScore { get; set; }
+
+    [JsonPropertyName("metadata")]
+    public Dictionary<string, string> Metadata { get; set; } = [];
+}
