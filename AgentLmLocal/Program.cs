@@ -1,11 +1,14 @@
 ﻿using System.ClientModel;
 using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
 
 class Program
 {
+    private static readonly JsonSerializerOptions ThreadSerializerOptions = new(JsonSerializerDefaults.Web);
+
     static async Task Main()
     {
         var baseUrl = Environment.GetEnvironmentVariable("OPENAI_BASE_URL") ?? "http://localhost:1234/v1";
@@ -29,7 +32,7 @@ class Program
                     instructions: "Be concise. Explain to an engineer.",
                     tools: [weatherTool]);
 #pragma warning restore OPENAI001
-            Console.WriteLine(await agent.RunAsync("One line: what is an agentic framework?"));
+            await DemoAgentThreadAsync(agent, "Responses");
         }
         catch
         {
@@ -39,8 +42,28 @@ class Program
                 .CreateAIAgent(
                     instructions: "Be concise. Explain to an engineer.",
                     tools: [weatherTool]);
-            Console.WriteLine(await agent.RunAsync("One line: what is an agentic framework?"));
+            await DemoAgentThreadAsync(agent, "Chat Completions");
         }
+    }
+
+    private static async Task DemoAgentThreadAsync(AIAgent agent, string scenarioLabel)
+    {
+        AgentThread thread = agent.GetNewThread();
+        await RunAndPrintAsync(agent, thread, "Remember this exact phrase: sharp mascot thread sample.");
+        await RunAndPrintAsync(agent, thread, "What did I just ask you to remember?");
+
+        JsonElement serializedThread = thread.Serialize(ThreadSerializerOptions);
+        Console.WriteLine($"Serialized thread payload: {serializedThread}");
+
+        AgentThread resumedThread = agent.DeserializeThread(serializedThread, ThreadSerializerOptions);
+        await RunAndPrintAsync(agent, resumedThread, "Resume the saved conversation and suggest the next action.");
+    }
+
+    private static async Task RunAndPrintAsync(AIAgent agent, AgentThread thread, string prompt)
+    {
+        Console.WriteLine($"\nuser : {prompt}");
+        var reply = await agent.RunAsync(prompt, thread);
+        Console.WriteLine($"agent: {reply}");
     }
 
     // Sample function tool wired into both CreateAIAgent calls.
