@@ -46,65 +46,10 @@ public static class Program
     {
         try
         {
-            // Set up the LM Studio client (OpenAI-compatible API)
-            var endpoint = Environment.GetEnvironmentVariable("LMSTUDIO_ENDPOINT") ?? DefaultEndpoint;
-            var apiKey = Environment.GetEnvironmentVariable("LMSTUDIO_API_KEY") ?? DefaultApiKey;
-            var modelId = Environment.GetEnvironmentVariable("LMSTUDIO_MODEL") ?? DefaultModelId;
-
-            // Validate endpoint format
-            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
-            {
-                throw new ArgumentException($"Invalid endpoint URL: {endpoint}");
-            }
-
-            Console.WriteLine($"Connecting to LM Studio at: {endpoint}");
-            Console.WriteLine($"Using model: {modelId}\n");
-
-            OpenAIClient lmStudioClient = new(
-                new ApiKeyCredential(apiKey),
-                new OpenAIClientOptions
-                {
-                    Endpoint = endpointUri
-                });
-
-            var chatClient = lmStudioClient.GetChatClient(modelId).AsIChatClient();
-
-        // Parse configuration for feedback executor
-        var minimumRating = int.TryParse(Environment.GetEnvironmentVariable("MINIMUM_RATING"), out var rating)
-            ? rating : DefaultMinimumRating;
-        var maxAttempts = int.TryParse(Environment.GetEnvironmentVariable("MAX_ATTEMPTS"), out var attempts)
-            ? attempts : DefaultMaxAttempts;
-
-        // Create the executors
-        var sloganWriter = new SloganWriterExecutor("SloganWriter", chatClient);
-        var feedbackProvider = new FeedbackExecutor("FeedbackProvider", chatClient)
-        {
-            MinimumRating = minimumRating,
-            MaxAttempts = maxAttempts
-        };
-
-        // Build the workflow by adding executors and connecting them
-        var workflow = new WorkflowBuilder(sloganWriter)
-            .AddEdge(sloganWriter, feedbackProvider)
-            .AddEdge(feedbackProvider, sloganWriter)
-            .WithOutputFrom(feedbackProvider)
-            .Build();
-
-            // Execute the workflow
-            await using StreamingRun run = await InProcessExecution.StreamAsync(workflow, input: "Create a slogan for a new electric SUV that is affordable and fun to drive.");
-            await foreach (WorkflowEvent evt in run.WatchStreamAsync())
-            {
-                if (evt is SloganGeneratedEvent or FeedbackEvent)
-                {
-                    // Custom events to allow us to monitor the progress of the workflow.
-                    Console.WriteLine($"{evt}");
-                }
-
-                if (evt is WorkflowOutputEvent outputEvent)
-                {
-                    Console.WriteLine($"{outputEvent}");
-                }
-            }
+            var config = LoadConfiguration();
+            var chatClient = CreateChatClient(config);
+            var workflow = BuildWorkflow(chatClient, config);
+            await ExecuteWorkflowAsync(workflow);
 
             Console.WriteLine("\nWorkflow completed successfully!");
         }
@@ -132,4 +77,82 @@ public static class Program
             Environment.Exit(1);
         }
     }
+
+    private static WorkflowConfiguration LoadConfiguration()
+    {
+        var endpoint = Environment.GetEnvironmentVariable("LMSTUDIO_ENDPOINT") ?? DefaultEndpoint;
+        var apiKey = Environment.GetEnvironmentVariable("LMSTUDIO_API_KEY") ?? DefaultApiKey;
+        var modelId = Environment.GetEnvironmentVariable("LMSTUDIO_MODEL") ?? DefaultModelId;
+
+        var minimumRating = int.TryParse(Environment.GetEnvironmentVariable("MINIMUM_RATING"), out var rating)
+            ? rating : DefaultMinimumRating;
+        var maxAttempts = int.TryParse(Environment.GetEnvironmentVariable("MAX_ATTEMPTS"), out var attempts)
+            ? attempts : DefaultMaxAttempts;
+
+        // Validate endpoint format
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri))
+        {
+            throw new ArgumentException($"Invalid endpoint URL: {endpoint}");
+        }
+
+        return new WorkflowConfiguration(endpointUri, apiKey, modelId, minimumRating, maxAttempts);
+    }
+
+    private static IChatClient CreateChatClient(WorkflowConfiguration config)
+    {
+        Console.WriteLine($"Connecting to LM Studio at: {config.EndpointUri}");
+        Console.WriteLine($"Using model: {config.ModelId}\n");
+
+        var lmStudioClient = new OpenAIClient(
+            new ApiKeyCredential(config.ApiKey),
+            new OpenAIClientOptions
+            {
+                Endpoint = config.EndpointUri
+            });
+
+        return lmStudioClient.GetChatClient(config.ModelId).AsIChatClient();
+    }
+
+    private static Workflow BuildWorkflow(IChatClient chatClient, WorkflowConfiguration config)
+    {
+        var sloganWriter = new SloganWriterExecutor("SloganWriter", chatClient);
+        var feedbackProvider = new FeedbackExecutor("FeedbackProvider", chatClient)
+        {
+            MinimumRating = config.MinimumRating,
+            MaxAttempts = config.MaxAttempts
+        };
+
+        return new WorkflowBuilder(sloganWriter)
+            .AddEdge(sloganWriter, feedbackProvider)
+            .AddEdge(feedbackProvider, sloganWriter)
+            .WithOutputFrom(feedbackProvider)
+            .Build();
+    }
+
+    private static async Task ExecuteWorkflowAsync(Workflow workflow)
+    {
+        await using StreamingRun run = await InProcessExecution.StreamAsync(
+            workflow,
+            input: "Create a slogan for a new electric SUV that is affordable and fun to drive.");
+
+        await foreach (WorkflowEvent evt in run.WatchStreamAsync())
+        {
+            if (evt is SloganGeneratedEvent or FeedbackEvent)
+            {
+                Console.WriteLine($"{evt}");
+            }
+
+            if (evt is WorkflowOutputEvent outputEvent)
+            {
+                Console.WriteLine($"{outputEvent}");
+            }
+        }
+    }
+
+    private record WorkflowConfiguration(
+        Uri EndpointUri,
+        string ApiKey,
+        string ModelId,
+        int MinimumRating,
+        int MaxAttempts);
 }

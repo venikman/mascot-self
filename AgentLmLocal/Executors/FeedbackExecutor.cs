@@ -1,5 +1,6 @@
 // Copyright (c) Microsoft. All rights reserved.
 
+using System.Collections.Concurrent;
 using System.Text.Json;
 using AgentLmLocal.Events;
 using AgentLmLocal.Models;
@@ -17,12 +18,11 @@ internal sealed class FeedbackExecutor : Executor<SloganResult>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
+    private readonly ConcurrentDictionary<IWorkflowContext, int> _attemptsByContext = new();
 
     public int MinimumRating { get; init; } = 8;
 
     public int MaxAttempts { get; init; } = 3;
-
-    private int _attempts;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FeedbackExecutor"/> class.
@@ -63,13 +63,18 @@ internal sealed class FeedbackExecutor : Executor<SloganResult>
             return;
         }
 
-        if (this._attempts >= this.MaxAttempts)
+        // Get current attempt count for this workflow context
+        var attempts = _attemptsByContext.GetOrAdd(context, 0);
+
+        if (attempts >= this.MaxAttempts)
         {
             await context.YieldOutputAsync($"The slogan was rejected after {this.MaxAttempts} attempts. Final slogan:\n\n{message.Slogan}", cancellationToken);
             return;
         }
 
         await context.SendMessageAsync(feedback, cancellationToken: cancellationToken);
-        this._attempts++;
+
+        // Increment attempt count for this workflow context
+        _attemptsByContext.AddOrUpdate(context, 1, (_, count) => count + 1);
     }
 }

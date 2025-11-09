@@ -11,6 +11,6 @@ namespace AgentLmLocal.Events;
 /// </summary>
 internal sealed class FeedbackEvent(FeedbackResult feedbackResult) : WorkflowEvent(feedbackResult)
 {
-    private readonly JsonSerializerOptions _options = new() { WriteIndented = true };
-    public override string ToString() => $"Feedback:\n{JsonSerializer.Serialize(feedbackResult, this._options)}";
+    private static readonly JsonSerializerOptions _options = new() { WriteIndented = true };
+    public override string ToString() => $"Feedback:\n{JsonSerializer.Serialize(feedbackResult, _options)}";
 }
