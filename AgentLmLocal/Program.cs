@@ -1,246 +1,266 @@
-﻿using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
+// Copyright (c) Microsoft. All rights reserved.
+
+using System.ClientModel;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using OpenAI;
+using OpenAI.Chat;
+using WorkflowCustomAgentExecutorsSample.Visualization;
+using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 
-var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+namespace WorkflowCustomAgentExecutorsSample;
+
+/// <summary>
+/// This sample demonstrates how to create custom executors for AI agents.
+/// This is useful when you want more control over the agent's behaviors in a workflow.
+///
+/// In this example, we create two custom executors:
+/// 1. SloganWriterExecutor: An AI agent that generates slogans based on a given task.
+/// 2. FeedbackExecutor: An AI agent that provides feedback on the generated slogans.
+/// (These two executors manage the agent instances and their conversation threads.)
+///
+/// The workflow alternates between these two executors until the slogan meets a certain
+/// quality threshold or a maximum number of attempts is reached.
+/// </summary>
+/// <remarks>
+/// Pre-requisites:
+/// - Foundational samples should be completed first.
+/// - An Azure OpenAI chat completion deployment that supports structured outputs must be configured.
+/// </remarks>
+public static class Program
 {
-    WriteIndented = true
-};
-jsonOptions.TypeInfoResolver = JsonTypeInfoResolver.Combine(new DefaultJsonTypeInfoResolver());
-
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder.SetMinimumLevel(LogLevel.None);
-});
-
-var services = new ServiceCollection()
-    .AddSingleton(loggerFactory)
-    .BuildServiceProvider();
-
-var weatherTool = AIFunctionFactory.Create(
-    (WeatherQuery query) => WeatherService.Lookup(query),
-    name: WeatherService.ToolName,
-    description: "Looks up a fake forecast so the middleware demo runs offline.",
-    serializerOptions: jsonOptions);
-
-var baseClient = new DemoChatClient(jsonOptions);
-
-var chatClientWithMiddleware = baseClient
-    .AsBuilder()
-    .Use(getResponseFunc: ChatClientLoggerMiddleware, getStreamingResponseFunc: null)
-    .Build();
-
-var functionAwareClient = new FunctionInvokingChatClient(chatClientWithMiddleware, loggerFactory, services);
-
-var agent = new ChatClientAgent(
-    functionAwareClient,
-    instructions: "You are a weather-savvy travel planner. Always invoke tools before guessing.",
-    tools: new List<AITool> { weatherTool },
-    loggerFactory: loggerFactory,
-    services: services);
-
-var middlewareAgent = agent
-    .AsBuilder()
-    .Use(AgentRunLoggerMiddleware, runStreamingFunc: null)
-    .Use(FunctionInvocationLoggerMiddleware)
-    .Build();
-
-var thread = middlewareAgent.GetNewThread();
-var requestChatOptions = new ChatOptions
-{
-    Tools = new List<AITool> { weatherTool }
-};
-
-var response = await middlewareAgent.RunAsync(
-    "I'm flying to Tokyo tomorrow. Should I pack an umbrella for Tokyo?",
-    thread,
-    new ChatClientAgentRunOptions(requestChatOptions),
-    CancellationToken.None);
-
-var finalText = response.Messages.LastOrDefault(static m => m.Role == ChatRole.Assistant)?.Text?.Trim();
-Console.WriteLine(finalText ?? "No assistant response was produced.");
-
-async Task<AgentRunResponse> AgentRunLoggerMiddleware(
-    IEnumerable<ChatMessage> messages,
-    AgentThread? thread,
-    AgentRunOptions? options,
-    AIAgent innerAgent,
-    CancellationToken cancellationToken)
-{
-    return await innerAgent
-        .RunAsync(messages, thread, options, cancellationToken)
-        .ConfigureAwait(false);
-}
-
-async ValueTask<object?> FunctionInvocationLoggerMiddleware(
-    AIAgent currentAgent,
-    FunctionInvocationContext context,
-    Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>> next,
-    CancellationToken cancellationToken)
-{
-    if (context.Arguments is IDictionary<string, object?> dict)
+    private static async Task Main()
     {
-        var queryArgs = ExtractQueryArgs(dict);
-        if (!queryArgs.TryGetValue("location", out var value) || string.IsNullOrWhiteSpace(Convert.ToString(value)))
-        {
-            queryArgs["location"] = "Seattle";
-        }
-    }
+        // Set up the Azure OpenAI client
+        var endpoint = Environment.GetEnvironmentVariable("LMSTUDIO_ENDPOINT") ?? "http://localhost:1234/v1";
+        var apiKey = Environment.GetEnvironmentVariable("LMSTUDIO_API_KEY") ?? "lm-studio";
+        var modelId = Environment.GetEnvironmentVariable("LMSTUDIO_MODEL") ?? "openai/gpt-oss-20b";
 
-    return await next(context, cancellationToken).ConfigureAwait(false);
-}
-
-IDictionary<string, object?> ExtractQueryArgs(IDictionary<string, object?> args)
-{
-    if (!args.TryGetValue("query", out var queryValue) || queryValue is null)
-    {
-        var created = new Dictionary<string, object?>();
-        args["query"] = created;
-        return created;
-    }
-
-    if (queryValue is IDictionary<string, object?> typed)
-    {
-        return typed;
-    }
-
-    if (queryValue is JsonElement json && json.ValueKind == JsonValueKind.Object)
-    {
-        var hydrated = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, jsonOptions)
-            ?? new Dictionary<string, object?>();
-        args["query"] = hydrated;
-        return hydrated;
-    }
-
-    var fallback = new Dictionary<string, object?>
-    {
-        ["value"] = queryValue
-    };
-    args["query"] = fallback;
-    return fallback;
-}
-
-async Task<ChatResponse> ChatClientLoggerMiddleware(
-    IEnumerable<ChatMessage> messages,
-    ChatOptions? options,
-    IChatClient innerClient,
-    CancellationToken cancellationToken)
-{
-    return await innerClient.GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-}
-
-internal sealed class DemoChatClient : IChatClient
-{
-    private readonly JsonSerializerOptions _jsonOptions;
-
-    public DemoChatClient(JsonSerializerOptions jsonOptions)
-    {
-        _jsonOptions = jsonOptions;
-    }
-
-    public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
-    {
-        var transcript = messages.ToList();
-        var needsToolCall = transcript.All(m => m.Role != ChatRole.Tool);
-
-        if (needsToolCall)
-        {
-            var user = transcript.Last(m => m.Role == ChatRole.User);
-            var location = WeatherService.ExtractLocation(user.Text) ?? "Seattle";
-            var call = new FunctionCallContent(
-                Guid.NewGuid().ToString("N"),
-                WeatherService.ToolName,
-                new Dictionary<string, object?>
-                {
-                    ["query"] = new Dictionary<string, object?>
-                    {
-                        ["location"] = location
-                    }
-                });
-
-            var assistant = new ChatMessage(ChatRole.Assistant, new List<AIContent> { call });
-            return Task.FromResult(new ChatResponse(assistant));
-        }
-
-        var toolMessage = transcript.Last(m => m.Role == ChatRole.Tool);
-        var resultContent = toolMessage.Contents?
-            .OfType<FunctionResultContent>()
-            .FirstOrDefault();
-
-        WeatherReport? report = resultContent?.Result switch
-        {
-            WeatherReport typed => typed,
-            JsonElement json => json.Deserialize<WeatherReport>(_jsonOptions),
-            null => null,
-            _ => JsonSerializer.Deserialize<WeatherReport>(JsonSerializer.Serialize(resultContent.Result, _jsonOptions), _jsonOptions)
-        };
-
-        var text = report is null
-            ? "I could not read the tool output."
-            : WeatherService.FormatResponse(report);
-
-        var finalAssistant = new ChatMessage(ChatRole.Assistant, text);
-        return Task.FromResult(new ChatResponse(finalAssistant));
-    }
-
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options,
-        CancellationToken cancellationToken) => throw new NotSupportedException("Streaming is not implemented in the local demo client.");
-
-    public void Dispose()
-    {
-    }
-
-    public object? GetService(Type serviceType, object? key) => null;
-}
-
-internal static class WeatherService
-{
-    public const string ToolName = "get_weather";
-
-    private static readonly IReadOnlyDictionary<string, WeatherReport> Samples = new Dictionary<string, WeatherReport>(StringComparer.OrdinalIgnoreCase)
-    {
-        ["Tokyo"] = new("Tokyo", "Expect steady rain with high humidity.", 68),
-        ["Seattle"] = new("Seattle", "Drizzle most of the day; skies clear overnight.", 64),
-        ["Lisbon"] = new("Lisbon", "Sunny with a light Atlantic breeze.", 78)
-    };
-
-    public static WeatherReport Lookup(WeatherQuery query)
-    {
-        var location = string.IsNullOrWhiteSpace(query.Location) ? "Seattle" : query.Location.Trim();
-        return Samples.TryGetValue(location, out var report)
-            ? report
-            : new WeatherReport(location, "Mild conditions, no precipitation expected.", 72);
-    }
-
-    public static string FormatResponse(WeatherReport report) =>
-        $"Forecast for {report.Location}: {report.Summary} High near {report.HighFahrenheit}\u00B0F.";
-
-    public static string? ExtractLocation(string? content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return null;
-        }
-
-        var tokens = content.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var token in tokens.Reverse())
-        {
-            var trimmed = token.Trim().TrimEnd('?', '!', '.', ',');
-            if (trimmed.Length >= 3 && char.IsLetter(trimmed[0]) && char.IsUpper(trimmed[0]))
+        OpenAIClient lmStudioClient = new(
+            new ApiKeyCredential(apiKey),
+            new OpenAIClientOptions
             {
-                return trimmed;
+                Endpoint = new Uri(endpoint)
+            });
+
+        var chatClient = lmStudioClient.GetChatClient(modelId).AsIChatClient();
+
+        // Create the executors
+        var sloganWriter = new SloganWriterExecutor("SloganWriter", chatClient);
+        var feedbackProvider = new FeedbackExecutor("FeedbackProvider", chatClient);
+
+        // Build the workflow by adding executors and connecting them
+        var vizRecorder = new WorkflowVisualizationRecorder(sloganWriter);
+        var workflow = new WorkflowBuilder(sloganWriter)
+            .AddVisualEdge(vizRecorder, sloganWriter, feedbackProvider)
+            .AddVisualEdge(vizRecorder, feedbackProvider, sloganWriter)
+            .WithVisualOutputFrom(vizRecorder, feedbackProvider)
+            .Build();
+
+        // Generate workflow visualization assets (Mermaid, DOT, SVG, PNG) to aid documentation/debugging.
+        GenerateWorkflowVisualizations(vizRecorder);
+
+        // Execute the workflow
+        await using StreamingRun run = await InProcessExecution.StreamAsync(workflow, input: "Create a slogan for a new electric SUV that is affordable and fun to drive.");
+        await foreach (WorkflowEvent evt in run.WatchStreamAsync())
+        {
+            if (evt is SloganGeneratedEvent or FeedbackEvent)
+            {
+                // Custom events to allow us to monitor the progress of the workflow.
+                Console.WriteLine($"{evt}");
+            }
+
+            if (evt is WorkflowOutputEvent outputEvent)
+            {
+                Console.WriteLine($"{outputEvent}");
             }
         }
+    }
 
-        return null;
+    private static void GenerateWorkflowVisualizations(WorkflowVisualizationRecorder recorder)
+    {
+        var visualization = recorder.CreateVisualization();
+        var visualizationDirectory = Path.Combine(AppContext.BaseDirectory, "WorkflowVisualization");
+        Directory.CreateDirectory(visualizationDirectory);
+        var dotPath = visualization.SaveDot(Path.Combine(visualizationDirectory, "slogan_workflow.dot"));
+        visualization.SaveMermaid(Path.Combine(visualizationDirectory, "slogan_workflow.mmd"));
+
+        // Export optional image formats. Errors are intentionally swallowed so workflow execution output stays clean.
+        visualization.TryExportImage(dotPath, Path.Combine(visualizationDirectory, "slogan_workflow.svg"), "svg", out _);
+        visualization.TryExportImage(dotPath, Path.Combine(visualizationDirectory, "slogan_workflow.png"), "png", out _);
     }
 }
 
-internal sealed record WeatherQuery(string? Location);
+/// <summary>
+/// A class representing the output of the slogan writer agent.
+/// </summary>
+public sealed class SloganResult
+{
+    [JsonPropertyName("task")]
+    public required string Task { get; set; }
 
-internal sealed record WeatherReport(string Location, string Summary, int HighFahrenheit);
+    [JsonPropertyName("slogan")]
+    public required string Slogan { get; set; }
+}
+
+/// <summary>
+/// A class representing the output of the feedback agent.
+/// </summary>
+public sealed class FeedbackResult
+{
+    [JsonPropertyName("comments")]
+    public string Comments { get; set; } = string.Empty;
+
+    [JsonPropertyName("rating")]
+    public int Rating { get; set; }
+
+    [JsonPropertyName("actions")]
+    public string Actions { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A custom event to indicate that a slogan has been generated.
+/// </summary>
+internal sealed class SloganGeneratedEvent(SloganResult sloganResult) : WorkflowEvent(sloganResult)
+{
+    public override string ToString() => $"Slogan: {sloganResult.Slogan}";
+}
+
+/// <summary>
+/// A custom executor that uses an AI agent to generate slogans based on a given task.
+/// Note that this executor has two message handlers:
+/// 1. HandleAsync(string message): Handles the initial task to create a slogan.
+/// 2. HandleAsync(Feedback message): Handles feedback to improve the slogan.
+/// </summary>
+internal sealed class SloganWriterExecutor : Executor
+{
+    private readonly AIAgent _agent;
+    private readonly AgentThread _thread;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SloganWriterExecutor"/> class.
+    /// </summary>
+    /// <param name="id">A unique identifier for the executor.</param>
+    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    public SloganWriterExecutor(string id, IChatClient chatClient) : base(id)
+    {
+        ChatClientAgentOptions agentOptions = new(instructions: "You are a professional slogan writer. You will be given a task to create a slogan.")
+        {
+            ChatOptions = new()
+            {
+                ResponseFormat = ChatResponseFormat.ForJsonSchema<SloganResult>()
+            }
+        };
+
+        this._agent = new ChatClientAgent(chatClient, agentOptions);
+        this._thread = this._agent.GetNewThread();
+    }
+
+    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
+        routeBuilder.AddHandler<string, SloganResult>(this.HandleAsync)
+                    .AddHandler<FeedbackResult, SloganResult>(this.HandleAsync);
+
+    public async ValueTask<SloganResult> HandleAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
+    {
+        var result = await this._agent.RunAsync(message, this._thread, cancellationToken: cancellationToken);
+
+        var sloganResult = JsonSerializer.Deserialize<SloganResult>(result.Text) ?? throw new InvalidOperationException("Failed to deserialize slogan result.");
+
+        await context.AddEventAsync(new SloganGeneratedEvent(sloganResult), cancellationToken);
+        return sloganResult;
+    }
+
+    public async ValueTask<SloganResult> HandleAsync(FeedbackResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
+    {
+        var feedbackMessage = $"""
+            Here is the feedback on your previous slogan:
+            Comments: {message.Comments}
+            Rating: {message.Rating}
+            Suggested Actions: {message.Actions}
+
+            Please use this feedback to improve your slogan.
+            """;
+
+        var result = await this._agent.RunAsync(feedbackMessage, this._thread, cancellationToken: cancellationToken);
+        var sloganResult = JsonSerializer.Deserialize<SloganResult>(result.Text) ?? throw new InvalidOperationException("Failed to deserialize slogan result.");
+
+        await context.AddEventAsync(new SloganGeneratedEvent(sloganResult), cancellationToken);
+        return sloganResult;
+    }
+}
+
+/// <summary>
+/// A custom event to indicate that feedback has been provided.
+/// </summary>
+internal sealed class FeedbackEvent(FeedbackResult feedbackResult) : WorkflowEvent(feedbackResult)
+{
+    private readonly JsonSerializerOptions _options = new() { WriteIndented = true };
+    public override string ToString() => $"Feedback:\n{JsonSerializer.Serialize(feedbackResult, this._options)}";
+}
+
+/// <summary>
+/// A custom executor that uses an AI agent to provide feedback on a slogan.
+/// </summary>
+internal sealed class FeedbackExecutor : Executor<SloganResult>
+{
+    private readonly AIAgent _agent;
+    private readonly AgentThread _thread;
+
+    public int MinimumRating { get; init; } = 8;
+
+    public int MaxAttempts { get; init; } = 3;
+
+    private int _attempts;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FeedbackExecutor"/> class.
+    /// </summary>
+    /// <param name="id">A unique identifier for the executor.</param>
+    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    public FeedbackExecutor(string id, IChatClient chatClient) : base(id)
+    {
+        ChatClientAgentOptions agentOptions = new(instructions: "You are a professional editor. You will be given a slogan and the task it is meant to accomplish.")
+        {
+            ChatOptions = new()
+            {
+                ResponseFormat = ChatResponseFormat.ForJsonSchema<FeedbackResult>()
+            }
+        };
+
+        this._agent = new ChatClientAgent(chatClient, agentOptions);
+        this._thread = this._agent.GetNewThread();
+    }
+
+    public override async ValueTask HandleAsync(SloganResult message, IWorkflowContext context, CancellationToken cancellationToken = default)
+    {
+        var sloganMessage = $"""
+            Here is a slogan for the task '{message.Task}':
+            Slogan: {message.Slogan}
+            Please provide feedback on this slogan, including comments, a rating from 1 to 10, and suggested actions for improvement.
+            """;
+
+        var response = await this._agent.RunAsync(sloganMessage, this._thread, cancellationToken: cancellationToken);
+        var feedback = JsonSerializer.Deserialize<FeedbackResult>(response.Text) ?? throw new InvalidOperationException("Failed to deserialize feedback.");
+
+        await context.AddEventAsync(new FeedbackEvent(feedback), cancellationToken);
+
+        if (feedback.Rating >= this.MinimumRating)
+        {
+            await context.YieldOutputAsync($"The following slogan was accepted:\n\n{message.Slogan}", cancellationToken);
+            return;
+        }
+
+        if (this._attempts >= this.MaxAttempts)
+        {
+            await context.YieldOutputAsync($"The slogan was rejected after {this.MaxAttempts} attempts. Final slogan:\n\n{message.Slogan}", cancellationToken);
+            return;
+        }
+
+        await context.SendMessageAsync(feedback, cancellationToken: cancellationToken);
+        this._attempts++;
+    }
+}
