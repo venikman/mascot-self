@@ -1,9 +1,12 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
+using AgentLmLocal;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
@@ -16,7 +19,7 @@ namespace WorkflowCustomAgentExecutorsSample.Agents;
 ///
 /// Based on the agentic workflows pattern described in the research paper.
 /// </summary>
-public sealed class PlannerAgent : Executor<string>
+public sealed class PlannerAgent : InstrumentedAgent<string>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
@@ -26,7 +29,10 @@ public sealed class PlannerAgent : Executor<string>
     /// </summary>
     /// <param name="id">A unique identifier for the planner agent.</param>
     /// <param name="chatClient">The chat client to use for the AI agent.</param>
-    public PlannerAgent(string id, IChatClient chatClient) : base(id)
+    /// <param name="logger">Logger instance for telemetry.</param>
+    /// <param name="telemetry">Telemetry instrumentation instance.</param>
+    public PlannerAgent(string id, IChatClient chatClient, ILogger<PlannerAgent> logger, AgentInstrumentation telemetry) 
+        : base(id, logger, telemetry)
     {
         ChatClientAgentOptions agentOptions = new(
             instructions: """
@@ -62,27 +68,43 @@ public sealed class PlannerAgent : Executor<string>
     }
 
     /// <summary>
-    /// Handles incoming task requests and generates workflow plans.
+    /// Handles incoming task requests and generates workflow plans with telemetry instrumentation.
     /// </summary>
-    public override async ValueTask HandleAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
+    protected override async ValueTask ExecuteInstrumentedAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        var prompt = $"""
-            Task: {message}
+        using var activity = ActivitySource.StartActivity("Agent.Planner.PlanGeneration");
+        
+        activity?.SetTag("task.content", message);
+        activity?.SetTag("task.length", message.Length);
+        
+        Telemetry.RecordActivity(Id, "planning_started");
+        
+        
+        {
+            var prompt = $"""
+                Task: {message}
 
-            Please create a detailed workflow plan for this task. Break it down into specific steps
-            with clear dependencies and execution order.
-            """;
+                Please create a detailed workflow plan for this task. Break it down into specific steps
+                with clear dependencies and execution order.
+                """;
 
-        var result = await this._agent.RunAsync(prompt, this._thread, cancellationToken: cancellationToken);
+            var result = await this._agent.RunAsync(prompt, this._thread, cancellationToken: cancellationToken);
 
-        var plan = JsonSerializer.Deserialize<WorkflowPlan>(result.Text)
-            ?? throw new InvalidOperationException("Failed to deserialize workflow plan.");
+            var plan = JsonSerializer.Deserialize<WorkflowPlan>(result.Text)!;
 
-        // Emit event for monitoring
-        await context.AddEventAsync(new PlanGeneratedEvent(plan), cancellationToken);
+            activity?.SetTag("plan.nodes.count", plan.Nodes.Count);
+            activity?.SetTag("plan.complexity", plan.EstimatedComplexity);
+            
+            Telemetry.RecordActivity(Id, "planning_completed");
 
-        // Send the plan to the next executor
-        await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
+            // Emit event for monitoring
+            await context.AddEventAsync(new PlanGeneratedEvent(plan), cancellationToken);
+
+            // Send the plan to the next executor
+            await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
+            
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        }
     }
 }
 

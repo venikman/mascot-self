@@ -1,8 +1,11 @@
 using System.Text.Json;
+using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
+using AgentLmLocal;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
@@ -16,7 +19,7 @@ namespace WorkflowCustomAgentExecutorsSample.Agents;
 ///
 /// Based on the agentic workflows pattern described in the research paper.
 /// </summary>
-public sealed class RecoveryHandlerAgent : Executor
+public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
@@ -38,7 +41,10 @@ public sealed class RecoveryHandlerAgent : Executor
     /// </summary>
     /// <param name="id">A unique identifier for the recovery handler agent.</param>
     /// <param name="chatClient">The chat client to use for the AI agent.</param>
-    public RecoveryHandlerAgent(string id, IChatClient chatClient) : base(id)
+    /// <param name="logger">Logger instance for telemetry.</param>
+    /// <param name="telemetry">Telemetry instrumentation instance.</param>
+    public RecoveryHandlerAgent(string id, IChatClient chatClient, ILogger<RecoveryHandlerAgent> logger, AgentInstrumentation telemetry) 
+        : base(id, logger, telemetry)
     {
         ChatClientAgentOptions agentOptions = new(
             instructions: """
@@ -76,18 +82,47 @@ public sealed class RecoveryHandlerAgent : Executor
         this._thread = this._agent.GetNewThread();
     }
 
-    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
+    protected override Microsoft.Agents.AI.Workflows.RouteBuilder ConfigureRoutes(Microsoft.Agents.AI.Workflows.RouteBuilder routeBuilder) =>
         routeBuilder.AddHandler<VerificationResult, RecoveryStrategy>(this.HandleVerificationFailureAsync)
                     .AddHandler<ExecutionResult, RecoveryStrategy>(this.HandleExecutionFailureAsync);
 
     /// <summary>
-    /// Handles verification failures.
+    /// Handles recovery with telemetry instrumentation.
     /// </summary>
-    public async ValueTask<RecoveryStrategy> HandleVerificationFailureAsync(
+    protected override async ValueTask ExecuteInstrumentedAsync(
+        object message,
+        IWorkflowContext context,
+        CancellationToken cancellationToken = default)
+    {
+        switch (message)
+        {
+            case VerificationResult verification:
+                await HandleVerificationFailureAsync(verification, context, cancellationToken);
+                break;
+            case ExecutionResult result:
+                await HandleExecutionFailureAsync(result, context, cancellationToken);
+                break;
+            default:
+                // Be less defensive: assume execution result
+                await HandleExecutionFailureAsync((ExecutionResult)message, context, cancellationToken);
+                break;
+        }
+    }
+
+    private async ValueTask<RecoveryStrategy> HandleVerificationFailureAsync(
         VerificationResult verification,
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
+        using var activity = ActivitySource.StartActivity("Agent.Recovery.VerificationFailure");
+        
+        activity?.SetTag("recovery.node_id", verification.NodeId);
+        activity?.SetTag("recovery.error_type", "verification_failure");
+        activity?.SetTag("recovery.quality_score", verification.QualityScore);
+        activity?.SetTag("recovery.requires_rollback", verification.RequiresRollback);
+        
+        Telemetry.RecordActivity(Id, "recovery_started");
+
         var errorMessage = $"""
             Verification failed for node: {verification.NodeId}
             Quality Score: {verification.QualityScore}/10
@@ -96,42 +131,66 @@ public sealed class RecoveryHandlerAgent : Executor
             Requires Rollback: {verification.RequiresRollback}
             """;
 
-        var strategy = await DetermineRecoveryStrategyAsync(
-            verification.NodeId,
-            errorMessage,
-            "verification_failure",
-            cancellationToken);
+        
+        {
+            var strategy = await DetermineRecoveryStrategyAsync(
+                verification.NodeId,
+                errorMessage,
+                "verification_failure",
+                cancellationToken);
 
-        await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
+            activity?.SetTag("recovery.action", strategy.RecoveryAction);
+            activity?.SetTag("recovery.state_restoration", strategy.StateRestorationNeeded);
+            activity?.SetTag("recovery.alternative_path", strategy.AlternativePath?.Count ?? 0);
 
-        // Execute recovery action
-        await ExecuteRecoveryAsync(strategy, context, cancellationToken);
+            await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
 
-        return strategy;
+            // Execute recovery action
+            await ExecuteRecoveryAsync(strategy, context, cancellationToken);
+
+            Telemetry.RecordActivity(Id, "recovery_completed");
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return strategy;
+        }
     }
 
-    /// <summary>
-    /// Handles execution failures.
-    /// </summary>
-    public async ValueTask<RecoveryStrategy> HandleExecutionFailureAsync(
+    private async ValueTask<RecoveryStrategy> HandleExecutionFailureAsync(
         ExecutionResult result,
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
+        using var activity = ActivitySource.StartActivity("Agent.Recovery.ExecutionFailure");
+        
+        activity?.SetTag("recovery.node_id", result.NodeId);
+        activity?.SetTag("recovery.error_type", "execution_failure");
+        activity?.SetTag("recovery.status", result.Status);
+        activity?.SetTag("recovery.execution_time_ms", result.ExecutionTimeMs);
+        
+        Telemetry.RecordActivity(Id, "recovery_started");
+
         var errorMessage = result.Error ?? "Unknown execution error";
 
-        var strategy = await DetermineRecoveryStrategyAsync(
-            result.NodeId,
-            errorMessage,
-            "execution_failure",
-            cancellationToken);
+        
+        {
+            var strategy = await DetermineRecoveryStrategyAsync(
+                result.NodeId,
+                errorMessage,
+                "execution_failure",
+                cancellationToken);
 
-        await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
+            activity?.SetTag("recovery.action", strategy.RecoveryAction);
+            activity?.SetTag("recovery.state_restoration", strategy.StateRestorationNeeded);
+            activity?.SetTag("recovery.alternative_path", strategy.AlternativePath?.Count ?? 0);
 
-        // Execute recovery action
-        await ExecuteRecoveryAsync(strategy, context, cancellationToken);
+            await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
 
-        return strategy;
+            // Execute recovery action
+            await ExecuteRecoveryAsync(strategy, context, cancellationToken);
+
+            Telemetry.RecordActivity(Id, "recovery_completed");
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return strategy;
+        }
     }
 
     /// <summary>
@@ -168,8 +227,7 @@ public sealed class RecoveryHandlerAgent : Executor
 
         var response = await _agent.RunAsync(prompt, _thread, cancellationToken: cancellationToken);
 
-        var strategy = JsonSerializer.Deserialize<RecoveryStrategy>(response.Text)
-            ?? throw new InvalidOperationException("Failed to deserialize recovery strategy.");
+        var strategy = JsonSerializer.Deserialize<RecoveryStrategy>(response.Text)!;
 
         strategy.ErrorType = errorType;
 
