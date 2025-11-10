@@ -1,14 +1,14 @@
-using System.ClientModel;
 using System.Diagnostics;
-using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using OpenAI;
 using WorkflowCustomAgentExecutorsSample.Agents;
 using AgentLmLocal;
+using AgentLmLocal.Configuration;
+using AgentLmLocal.Services;
+using AgentLmLocal.Workflow;
 using WorkflowCustomAgentExecutorsSample.Models;
+using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 
 namespace WorkflowCustomAgentExecutorsSample;
 
@@ -34,11 +34,25 @@ public class AgenticWorkflowExample
 {
     private readonly ILogger<AgenticWorkflowExample> _logger;
     private readonly AgentInstrumentation _telemetry;
-    
-    public AgenticWorkflowExample(ILogger<AgenticWorkflowExample> logger, AgentInstrumentation telemetry)
+    private readonly AgentConfiguration _config;
+    private readonly AgentFactory _agentFactory;
+    private readonly LlmService _llmService;
+    private readonly IChatClient _chatClient;
+
+    public AgenticWorkflowExample(
+        ILogger<AgenticWorkflowExample> logger,
+        AgentInstrumentation telemetry,
+        AgentConfiguration config,
+        AgentFactory agentFactory,
+        LlmService llmService,
+        IChatClient chatClient)
     {
         _logger = logger;
         _telemetry = telemetry;
+        _config = config;
+        _agentFactory = agentFactory;
+        _llmService = llmService;
+        _chatClient = chatClient;
     }
     
     public async Task RunExample()
@@ -60,48 +74,36 @@ public class AgenticWorkflowExample
             • Telemetry: Comprehensive monitoring and observability
             """);
 
-        var endpoint = Environment.GetEnvironmentVariable("LMSTUDIO_ENDPOINT") ?? "http://localhost:1234/v1";
-        var apiKey = Environment.GetEnvironmentVariable("LMSTUDIO_API_KEY") ?? "lm-studio";
-        var modelId = Environment.GetEnvironmentVariable("LMSTUDIO_MODEL") ?? "openai/gpt-oss-20b";
+        _logger.LogInformation("Configuring agents with endpoint: {Endpoint}, model: {ModelId}",
+            _config.LmStudioEndpoint, _config.ModelId);
 
-        _logger.LogInformation("Configuring LM Studio client with endpoint: {Endpoint}, model: {ModelId}", endpoint, modelId);
-        
-        OpenAI.OpenAIClient lmStudioClient = new(
-            new System.ClientModel.ApiKeyCredential(apiKey),
-            new OpenAI.OpenAIClientOptions
-            {
-                Endpoint = new Uri(endpoint)
-            });
-
-        var chatClient = lmStudioClient.GetChatClient(modelId).AsIChatClient();
-
-        // Create agents with telemetry instrumentation
+        // Create agents with telemetry instrumentation using factory
         _logger.LogInformation("Creating agent instances with telemetry integration");
-        
-        var planner = new PlannerAgent("Planner", chatClient, 
-            new Microsoft.Extensions.Logging.Logger<PlannerAgent>(new Microsoft.Extensions.Logging.LoggerFactory()), 
+
+        var planner = new PlannerAgent("Planner", _agentFactory, _llmService,
+            new Microsoft.Extensions.Logging.Logger<PlannerAgent>(new Microsoft.Extensions.Logging.LoggerFactory()),
             _telemetry);
-            
-        var executor = new ExecutorAgent("Executor", chatClient,
-            new Microsoft.Extensions.Logging.Logger<ExecutorAgent>(new Microsoft.Extensions.Logging.LoggerFactory()), 
+
+        var executor = new ExecutorAgent("Executor", _agentFactory, _llmService,
+            new Microsoft.Extensions.Logging.Logger<ExecutorAgent>(new Microsoft.Extensions.Logging.LoggerFactory()),
             _telemetry)
         {
             VerificationInterval = 2 // Verify every 2 nodes
         };
-        
-        var verifier = new VerifierAgent("Verifier", chatClient,
-            new Microsoft.Extensions.Logging.Logger<VerifierAgent>(new Microsoft.Extensions.Logging.LoggerFactory()), 
+
+        var verifier = new VerifierAgent("Verifier", _agentFactory, _llmService,
+            new Microsoft.Extensions.Logging.Logger<VerifierAgent>(new Microsoft.Extensions.Logging.LoggerFactory()),
             _telemetry)
         {
-            MinimumQualityScore = 7,
+            MinimumQualityScore = _config.MinimumRating,
             EnableSpeculativeExecution = true
         };
-        
-        var recoveryHandler = new RecoveryHandlerAgent("RecoveryHandler", chatClient,
-            new Microsoft.Extensions.Logging.Logger<RecoveryHandlerAgent>(new Microsoft.Extensions.Logging.LoggerFactory()), 
+
+        var recoveryHandler = new RecoveryHandlerAgent("RecoveryHandler", _agentFactory, _llmService,
+            new Microsoft.Extensions.Logging.Logger<RecoveryHandlerAgent>(new Microsoft.Extensions.Logging.LoggerFactory()),
             _telemetry)
         {
-            MaxRetries = 3,
+            MaxRetries = _config.MaxAttempts,
             EnableStateSnapshots = true
         };
 
@@ -149,104 +151,34 @@ public class AgenticWorkflowExample
         _logger.LogInformation("Starting workflow execution for task: {Task}", task);
         activity?.SetTag("workflow.task", task);
         activity?.SetTag("workflow.start_time", DateTimeOffset.UtcNow);
-        
+
         Console.WriteLine($"\nTask: {task}\n");
         Console.WriteLine("Executing workflow...\n");
 
-        var eventCounts = new Dictionary<string, int>
-        {
-            ["PlanGeneratedEvent"] = 0,
-            ["NodeExecutedEvent"] = 0,
-            ["VerificationCompletedEvent"] = 0,
-            ["RecoveryStrategyDeterminedEvent"] = 0,
-            ["RecoveryActionEvent"] = 0,
-            ["WorkflowOutputEvent"] = 0
-        };
+        // Create event handler
+        var eventHandler = new WorkflowEventHandler(_logger, _telemetry);
+        eventHandler.SetCurrentActivity(activity);
 
-        
         {
             await using Microsoft.Agents.AI.Workflows.StreamingRun run = await Microsoft.Agents.AI.Workflows.InProcessExecution.StreamAsync(workflow, input: task);
             await foreach (Microsoft.Agents.AI.Workflows.WorkflowEvent evt in run.WatchStreamAsync())
             {
-                var eventType = evt.GetType().Name;
-                eventCounts[eventType] = eventCounts.GetValueOrDefault(eventType, 0) + 1;
-                
-                _logger.LogDebug("Workflow event: {EventType} - {EventDetails}", eventType, evt);
-                
-                switch (evt)
-                {
-                    case PlanGeneratedEvent planEvent:
-                        activity?.SetTag("workflow.plan_generated", true);
-                        _telemetry.RecordActivity("Workflow", "plan_generated");
-                        Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-
-                    case NodeExecutedEvent nodeEvent:
-                        // NodeExecutedEvent contains ExecutionResult in its base data
-                        var nodeResult = nodeEvent.GetType().GetProperty("Data")?.GetValue(nodeEvent) as ExecutionResult;
-                        if (nodeResult != null)
-                        {
-                            activity?.SetTag($"workflow.node_{nodeResult.NodeId}_executed", true);
-                            _telemetry.RecordActivity("Workflow", $"node_executed_{nodeResult.Status}");
-                        }
-                        Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-
-                    case VerificationCompletedEvent verificationEvent:
-                        // VerificationCompletedEvent contains VerificationResult in its base data
-                        var verificationResult = verificationEvent.GetType().GetProperty("Data")?.GetValue(verificationEvent) as VerificationResult;
-                        if (verificationResult != null)
-                        {
-                            activity?.SetTag("workflow.verification_completed", true);
-                            activity?.SetTag($"workflow.verification_score", verificationResult.QualityScore);
-                            _telemetry.RecordActivity("Workflow", verificationResult.Passed ? "verification_passed" : "verification_failed");
-                        }
-                        Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-
-                    case RecoveryStrategyDeterminedEvent recoveryEvent:
-                        // RecoveryStrategyDeterminedEvent contains RecoveryStrategy in its base data
-                        var recoveryStrategy = recoveryEvent.GetType().GetProperty("Data")?.GetValue(recoveryEvent) as RecoveryStrategy;
-                        if (recoveryStrategy != null)
-                        {
-                            activity?.SetTag("workflow.recovery_strategy_determined", true);
-                            activity?.SetTag($"workflow.recovery_action", recoveryStrategy.RecoveryAction);
-                            _telemetry.RecordActivity("Workflow", $"recovery_{recoveryStrategy.RecoveryAction}");
-                        }
-                        Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-
-                    case RecoveryActionEvent:
-                        activity?.SetTag("workflow.recovery_action_taken", true);
-                        _telemetry.RecordActivity("Workflow", "recovery_action");
-                        Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-
-                    case Microsoft.Agents.AI.Workflows.WorkflowOutputEvent outputEvent:
-                        activity?.SetTag("workflow.output_generated", true);
-                        activity?.SetTag($"workflow.output_length", outputEvent.ToString()?.Length ?? 0);
-                        _telemetry.RecordActivity("Workflow", "output_generated");
-                        Console.WriteLine($"\n>>> OUTPUT: {outputEvent}\n");
-                        break;
-                        
-                    default:
-                Console.WriteLine($"[{eventType}] {evt}");
-                        break;
-                }
+                await eventHandler.HandleEventAsync(evt);
             }
-            
+
             // Log workflow completion metrics
+            var eventCounts = eventHandler.GetEventCounts();
             activity?.SetTag("workflow.completion_time", DateTimeOffset.UtcNow);
             activity?.SetTag("workflow.events.total", eventCounts.Values.Sum());
-            activity?.SetTag("workflow.events.plan_generated", eventCounts["PlanGeneratedEvent"]);
-            activity?.SetTag("workflow.events.nodes_executed", eventCounts["NodeExecutedEvent"]);
-            activity?.SetTag("workflow.events.verifications", eventCounts["VerificationCompletedEvent"]);
-            activity?.SetTag("workflow.events.recoveries", eventCounts["RecoveryStrategyDeterminedEvent"]);
-            activity?.SetTag("workflow.events.outputs", eventCounts["WorkflowOutputEvent"]);
-            
-            _logger.LogInformation("Workflow completed successfully. Events: {EventSummary}", 
+            activity?.SetTag("workflow.events.plan_generated", eventCounts.GetValueOrDefault(nameof(PlanGeneratedEvent), 0));
+            activity?.SetTag("workflow.events.nodes_executed", eventCounts.GetValueOrDefault(nameof(NodeExecutedEvent), 0));
+            activity?.SetTag("workflow.events.verifications", eventCounts.GetValueOrDefault(nameof(VerificationCompletedEvent), 0));
+            activity?.SetTag("workflow.events.recoveries", eventCounts.GetValueOrDefault(nameof(RecoveryStrategyDeterminedEvent), 0));
+            activity?.SetTag("workflow.events.outputs", eventCounts.GetValueOrDefault(nameof(WorkflowOutputEvent), 0));
+
+            _logger.LogInformation("Workflow completed successfully. Events: {EventSummary}",
                 string.Join(", ", eventCounts.Select(kvp => $"{kvp.Key}: {kvp.Value}")));
-                
+
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
     }

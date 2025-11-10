@@ -1,12 +1,12 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 using AgentLmLocal;
+using AgentLmLocal.Services;
+using AgentLmLocal.Workflow;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
@@ -23,19 +23,27 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
+    private readonly LlmService _llmService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlannerAgent"/> class.
     /// </summary>
     /// <param name="id">A unique identifier for the planner agent.</param>
-    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    /// <param name="agentFactory">Factory for creating AI agents.</param>
+    /// <param name="llmService">Service for LLM invocations.</param>
     /// <param name="logger">Logger instance for telemetry.</param>
     /// <param name="telemetry">Telemetry instrumentation instance.</param>
-    public PlannerAgent(string id, IChatClient chatClient, ILogger<PlannerAgent> logger, AgentInstrumentation telemetry) 
+    public PlannerAgent(
+        string id,
+        AgentFactory agentFactory,
+        LlmService llmService,
+        ILogger<PlannerAgent> logger,
+        AgentInstrumentation telemetry)
         : base(id, logger, telemetry)
     {
-        ChatClientAgentOptions agentOptions = new(
-            instructions: """
+        _llmService = llmService;
+
+        var instructions = """
             You are an expert task planner that decomposes complex tasks into structured workflow plans.
 
             Your responsibilities:
@@ -55,16 +63,11 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
             - Input and output schemas
 
             Ensure the plan is executable, has no circular dependencies, and maximizes parallelism where possible.
-            """)
-        {
-            ChatOptions = new()
-            {
-                ResponseFormat = ChatResponseFormat.ForJsonSchema<WorkflowPlan>()
-            }
-        };
+            """;
 
-        this._agent = new ChatClientAgent(chatClient, agentOptions);
-        this._thread = this._agent.GetNewThread();
+        (_agent, _thread) = agentFactory.CreateAgent(
+            instructions,
+            ChatResponseFormat.ForJsonSchema<WorkflowPlan>());
     }
 
     /// <summary>
@@ -73,13 +76,13 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
     protected override async ValueTask ExecuteInstrumentedAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Planner.PlanGeneration");
-        
+
         activity?.SetTag("task.content", message);
         activity?.SetTag("task.length", message.Length);
-        
+
         Telemetry.RecordActivity(Id, "planning_started");
-        
-        
+
+
         {
             var prompt = $"""
                 Task: {message}
@@ -88,13 +91,12 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
                 with clear dependencies and execution order.
                 """;
 
-            var result = await this._agent.RunAsync(prompt, this._thread, cancellationToken: cancellationToken);
-
-            var plan = JsonSerializer.Deserialize<WorkflowPlan>(result.Text)!;
+            var plan = await _llmService.InvokeStructuredAsync<WorkflowPlan>(
+                _agent, _thread, prompt, cancellationToken);
 
             activity?.SetTag("plan.nodes.count", plan.Nodes.Count);
             activity?.SetTag("plan.complexity", plan.EstimatedComplexity);
-            
+
             Telemetry.RecordActivity(Id, "planning_completed");
 
             // Emit event for monitoring
@@ -102,21 +104,8 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
 
             // Send the plan to the next executor
             await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
-            
+
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
-    }
-}
-
-/// <summary>
-/// Event emitted when a workflow plan is generated.
-/// </summary>
-public sealed class PlanGeneratedEvent(WorkflowPlan plan) : WorkflowEvent(plan)
-{
-    public override string ToString()
-    {
-        var nodeCount = plan.Nodes.Count;
-        var complexity = plan.EstimatedComplexity;
-        return $"Plan Generated: {nodeCount} nodes, complexity: {complexity}\nTask: {plan.Task}";
     }
 }

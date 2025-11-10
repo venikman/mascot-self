@@ -1,12 +1,12 @@
-using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
-using AgentLmLocal;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
+using AgentLmLocal;
+using AgentLmLocal.Services;
+using AgentLmLocal.Workflow;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
@@ -23,6 +23,7 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
+    private readonly LlmService _llmService;
 
     /// <summary>
     /// Minimum quality score (1-10) required to pass verification.
@@ -38,14 +39,21 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
     /// Initializes a new instance of the <see cref="VerifierAgent"/> class.
     /// </summary>
     /// <param name="id">A unique identifier for the verifier agent.</param>
-    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    /// <param name="agentFactory">Factory for creating AI agents.</param>
+    /// <param name="llmService">Service for LLM invocations.</param>
     /// <param name="logger">Logger instance for telemetry.</param>
     /// <param name="telemetry">Telemetry instrumentation instance.</param>
-    public VerifierAgent(string id, IChatClient chatClient, ILogger<VerifierAgent> logger, AgentInstrumentation telemetry) 
+    public VerifierAgent(
+        string id,
+        AgentFactory agentFactory,
+        LlmService llmService,
+        ILogger<VerifierAgent> logger,
+        AgentInstrumentation telemetry)
         : base(id, logger, telemetry)
     {
-        ChatClientAgentOptions agentOptions = new(
-            instructions: """
+        _llmService = llmService;
+
+        var instructions = """
             You are an expert verification agent that evaluates the quality and correctness of workflow execution results.
 
             Your responsibilities:
@@ -64,19 +72,14 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             - Efficiency: Was the execution reasonably efficient?
 
             Be objective and thorough in your assessments. Provide actionable feedback.
-            """)
-        {
-            ChatOptions = new()
-            {
-                ResponseFormat = ChatResponseFormat.ForJsonSchema<VerificationResult>()
-            }
-        };
+            """;
 
-        this._agent = new ChatClientAgent(chatClient, agentOptions);
-        this._thread = this._agent.GetNewThread();
+        (_agent, _thread) = agentFactory.CreateAgent(
+            instructions,
+            ChatResponseFormat.ForJsonSchema<VerificationResult>());
     }
 
-    protected override Microsoft.Agents.AI.Workflows.RouteBuilder ConfigureRoutes(Microsoft.Agents.AI.Workflows.RouteBuilder routeBuilder) =>
+    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
         routeBuilder.AddHandler<List<ExecutionResult>, VerificationResult>(this.VerifyMultipleAsync)
                     .AddHandler<ExecutionResult, VerificationResult>(this.VerifySingleAsync);
 
@@ -97,7 +100,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
                 await VerifySingleAsync(result, context, cancellationToken);
                 break;
             default:
-                // Be less defensive: assume single result message
                 await VerifySingleAsync((ExecutionResult)message, context, cancellationToken);
                 break;
         }
@@ -109,18 +111,18 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Verifier.MultiVerification");
-        
+
         activity?.SetTag("verification.results.count", results.Count);
         activity?.SetTag("verification.minimum_score", MinimumQualityScore);
         activity?.SetTag("verification.speculative_enabled", EnableSpeculativeExecution);
-        
+
         Telemetry.RecordActivity(Id, "verification_started");
-        
+
         var verificationResults = new List<VerificationResult>();
         var passedVerifications = 0;
         var failedVerifications = 0;
 
-        
+
         {
             foreach (var result in results)
             {
@@ -159,7 +161,7 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
 
             activity?.SetTag("verification.passed_count", passedVerifications);
             activity?.SetTag("verification.failed_count", failedVerifications);
-            
+
             Telemetry.RecordActivity(Id, "verification_completed");
 
             // All passed - send success signal
@@ -168,10 +170,10 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
                 cancellationToken);
 
             activity?.SetStatus(ActivityStatusCode.Ok);
-            return verificationResults.FirstOrDefault() ?? new VerificationResult 
-            { 
-                NodeId = "multi_verification", 
-                Passed = true, 
+            return verificationResults.FirstOrDefault() ?? new VerificationResult
+            {
+                NodeId = "multi_verification",
+                Passed = true,
                 QualityScore = 10,
                 Feedback = "All verifications passed successfully"
             };
@@ -184,14 +186,13 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Verifier.SingleVerification");
-        
+
         activity?.SetTag("verification.node_id", result.NodeId);
         activity?.SetTag("verification.minimum_score", MinimumQualityScore);
         activity?.SetTag("verification.speculative_enabled", EnableSpeculativeExecution);
-        
+
         Telemetry.RecordActivity(Id, "verification_started");
 
-        
         {
             var verification = await PerformVerificationAsync(result, cancellationToken);
 
@@ -228,7 +229,8 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         CancellationToken cancellationToken)
     {
         // Handle execution failures specially
-        if (result.Status == "failure")
+        var status = EnumExtensions.ParseExecutionStatus(result.Status);
+        if (status == ExecutionStatus.Failure)
         {
             return new VerificationResult
             {
@@ -248,7 +250,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             Status: {result.Status}
             Output: {result.Output}
             Execution Time: {result.ExecutionTimeMs}ms
-            Metadata: {JsonSerializer.Serialize(result.Metadata)}
 
             Evaluate the quality and correctness of this result. Provide:
             1. A quality score from 1-10
@@ -263,9 +264,8 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             - Critical errors: Require rollback
             """;
 
-        var response = await _agent.RunAsync(prompt, _thread, cancellationToken: cancellationToken);
-
-        var verification = JsonSerializer.Deserialize<VerificationResult>(response.Text)!;
+        var verification = await _llmService.InvokeStructuredAsync<VerificationResult>(
+            _agent, _thread, prompt, cancellationToken);
 
         // Apply business rules
         if (verification.QualityScore < MinimumQualityScore)
@@ -285,18 +285,5 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         }
 
         return verification;
-    }
-}
-
-/// <summary>
-/// Event emitted when verification is completed.
-/// </summary>
-public sealed class VerificationCompletedEvent(VerificationResult result) : WorkflowEvent(result)
-{
-    public override string ToString()
-    {
-        var status = result.Passed ? "PASSED" : "FAILED";
-        return $"Verification {status} for {result.NodeId}: Score {result.QualityScore}/10\n" +
-               $"Feedback: {result.Feedback}";
     }
 }

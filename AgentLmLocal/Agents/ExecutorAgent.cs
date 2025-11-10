@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using AgentLmLocal;
+using AgentLmLocal.Services;
+using AgentLmLocal.Workflow;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
@@ -21,6 +22,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
+    private readonly LlmService _llmService;
     private readonly Dictionary<string, object> _executionState = [];
 
     /// <summary>
@@ -34,14 +36,21 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     /// Initializes a new instance of the <see cref="ExecutorAgent"/> class.
     /// </summary>
     /// <param name="id">A unique identifier for the executor agent.</param>
-    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    /// <param name="agentFactory">Factory for creating AI agents.</param>
+    /// <param name="llmService">Service for LLM invocations.</param>
     /// <param name="logger">Logger instance for telemetry.</param>
     /// <param name="telemetry">Telemetry instrumentation instance.</param>
-    public ExecutorAgent(string id, IChatClient chatClient, ILogger<ExecutorAgent> logger, AgentInstrumentation telemetry) 
+    public ExecutorAgent(
+        string id,
+        AgentFactory agentFactory,
+        LlmService llmService,
+        ILogger<ExecutorAgent> logger,
+        AgentInstrumentation telemetry)
         : base(id, logger, telemetry)
     {
-        ChatClientAgentOptions agentOptions = new(
-            instructions: """
+        _llmService = llmService;
+
+        var instructions = """
             You are an expert executor agent that implements workflow steps.
 
             Your responsibilities:
@@ -61,12 +70,9 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
             - Report execution results
 
             Simulate realistic execution times and potential errors for demonstration purposes.
-            """)
-        {
-        };
+            """;
 
-        this._agent = new ChatClientAgent(chatClient, agentOptions);
-        this._thread = this._agent.GetNewThread();
+        (_agent, _thread) = agentFactory.CreateAgent(instructions);
     }
 
     /// <summary>
@@ -75,17 +81,17 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     protected override async ValueTask ExecuteInstrumentedAsync(WorkflowPlan plan, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Executor.PlanExecution");
-        
+
         activity?.SetTag("plan.nodes.total", plan.Nodes.Count);
         activity?.SetTag("plan.execution_order.count", plan.ExecutionOrder.Count);
-        
+
         Telemetry.RecordActivity(Id, "execution_started");
-        
+
         var results = new List<ExecutionResult>();
         var successfulExecutions = 0;
         var failedExecutions = 0;
 
-        
+
         {
             foreach (var nodeId in plan.ExecutionOrder)
             {
@@ -102,7 +108,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
                 var result = await ExecuteNodeAsync(node, plan, cancellationToken);
                 results.Add(result);
 
-                if (result.Status == "success")
+                if (result.Status == ExecutionStatus.Success.ToLowerString())
                 {
                     successfulExecutions++;
                 }
@@ -128,7 +134,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
                 }
 
                 // Stop if execution failed
-                if (result.Status == "failure")
+                if (result.Status == ExecutionStatus.Failure.ToLowerString())
                 {
                     await context.SendMessageAsync(result, cancellationToken: cancellationToken);
                     activity?.SetTag("execution.failed_at_node", nodeId);
@@ -144,14 +150,14 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
 
             activity?.SetTag("execution.successful_nodes", successfulExecutions);
             activity?.SetTag("execution.failed_nodes", failedExecutions);
-            
+
             Telemetry.RecordActivity(Id, "execution_completed");
 
             // Emit completion event
             await context.YieldOutputAsync(
                 $"Workflow execution completed: {plan.Nodes.Count} nodes executed successfully.",
                 cancellationToken);
-                
+
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
     }
@@ -166,7 +172,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     {
         var stopwatch = Stopwatch.StartNew();
 
-        
+
         {
             // Check dependencies
             foreach (var depId in node.Dependencies)
@@ -176,7 +182,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
                     return new ExecutionResult
                     {
                         NodeId = node.Id,
-                        Status = "failure",
+                        Status = ExecutionStatus.Failure.ToLowerString(),
                         Error = $"Dependency {depId} not satisfied",
                         ExecutionTimeMs = stopwatch.ElapsedMilliseconds
                     };
@@ -185,17 +191,18 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
 
             // Simulate execution based on node type
             string output;
-            switch (node.Type.ToLowerInvariant())
+            var nodeType = EnumExtensions.ParseNodeType(node.Type);
+            switch (nodeType)
             {
-                case "tool_call":
+                case NodeType.ToolCall:
                     output = await SimulateToolCallAsync(node, cancellationToken);
                     break;
 
-                case "llm_invocation":
+                case NodeType.LlmInvocation:
                     output = await ExecuteLLMInvocationAsync(node, cancellationToken);
                     break;
 
-                case "conditional":
+                case NodeType.Conditional:
                     output = EvaluateConditional(node);
                     break;
 
@@ -209,7 +216,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
             return new ExecutionResult
             {
                 NodeId = node.Id,
-                Status = "success",
+                Status = ExecutionStatus.Success.ToLowerString(),
                 Output = output,
                 ExecutionTimeMs = stopwatch.ElapsedMilliseconds,
                 Metadata = new Dictionary<string, object>
@@ -231,8 +238,7 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     private async Task<string> ExecuteLLMInvocationAsync(WorkflowNode node, CancellationToken cancellationToken)
     {
         var prompt = $"Execute this step: {node.Description}";
-        var result = await _agent.RunAsync(prompt, _thread, cancellationToken: cancellationToken);
-        return result.Text;
+        return await _llmService.InvokeAsync(_agent, _thread, prompt, cancellationToken);
     }
 
     private string EvaluateConditional(WorkflowNode node)
@@ -240,21 +246,4 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
         // Simple conditional evaluation
         return $"Conditional evaluated: {node.Description}";
     }
-}
-
-/// <summary>
-/// Event emitted when a node is executed.
-/// </summary>
-public sealed class NodeExecutedEvent(ExecutionResult result) : WorkflowEvent(result)
-{
-    public override string ToString() =>
-        $"Node {result.NodeId}: {result.Status} ({result.ExecutionTimeMs}ms)";
-}
-
-/// <summary>
-/// Event emitted when an execution error occurs.
-/// </summary>
-public sealed class ExecutionErrorEvent(string error) : WorkflowEvent(error)
-{
-    public override string ToString() => $"Execution Error: {error}";
 }

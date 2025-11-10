@@ -1,12 +1,12 @@
-using System.Text.Json;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
-using AgentLmLocal;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
+using AgentLmLocal;
+using AgentLmLocal.Services;
+using AgentLmLocal.Workflow;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
@@ -23,6 +23,7 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
+    private readonly LlmService _llmService;
     private readonly Dictionary<string, int> _retryCount = [];
     private readonly Stack<object> _stateSnapshots = new();
 
@@ -40,14 +41,21 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
     /// Initializes a new instance of the <see cref="RecoveryHandlerAgent"/> class.
     /// </summary>
     /// <param name="id">A unique identifier for the recovery handler agent.</param>
-    /// <param name="chatClient">The chat client to use for the AI agent.</param>
+    /// <param name="agentFactory">Factory for creating AI agents.</param>
+    /// <param name="llmService">Service for LLM invocations.</param>
     /// <param name="logger">Logger instance for telemetry.</param>
     /// <param name="telemetry">Telemetry instrumentation instance.</param>
-    public RecoveryHandlerAgent(string id, IChatClient chatClient, ILogger<RecoveryHandlerAgent> logger, AgentInstrumentation telemetry) 
+    public RecoveryHandlerAgent(
+        string id,
+        AgentFactory agentFactory,
+        LlmService llmService,
+        ILogger<RecoveryHandlerAgent> logger,
+        AgentInstrumentation telemetry)
         : base(id, logger, telemetry)
     {
-        ChatClientAgentOptions agentOptions = new(
-            instructions: """
+        _llmService = llmService;
+
+        var instructions = """
             You are an expert recovery handler that analyzes failures and implements recovery strategies.
 
             Your responsibilities:
@@ -70,19 +78,14 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             - Logic: Business rule violations (→ SKIP or ESCALATE)
 
             Be conservative with retries and aggressive with state protection.
-            """)
-        {
-            ChatOptions = new()
-            {
-                ResponseFormat = ChatResponseFormat.ForJsonSchema<RecoveryStrategy>()
-            }
-        };
+            """;
 
-        this._agent = new ChatClientAgent(chatClient, agentOptions);
-        this._thread = this._agent.GetNewThread();
+        (_agent, _thread) = agentFactory.CreateAgent(
+            instructions,
+            ChatResponseFormat.ForJsonSchema<RecoveryStrategy>());
     }
 
-    protected override Microsoft.Agents.AI.Workflows.RouteBuilder ConfigureRoutes(Microsoft.Agents.AI.Workflows.RouteBuilder routeBuilder) =>
+    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
         routeBuilder.AddHandler<VerificationResult, RecoveryStrategy>(this.HandleVerificationFailureAsync)
                     .AddHandler<ExecutionResult, RecoveryStrategy>(this.HandleExecutionFailureAsync);
 
@@ -103,7 +106,6 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
                 await HandleExecutionFailureAsync(result, context, cancellationToken);
                 break;
             default:
-                // Be less defensive: assume execution result
                 await HandleExecutionFailureAsync((ExecutionResult)message, context, cancellationToken);
                 break;
         }
@@ -115,12 +117,12 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Recovery.VerificationFailure");
-        
+
         activity?.SetTag("recovery.node_id", verification.NodeId);
         activity?.SetTag("recovery.error_type", "verification_failure");
         activity?.SetTag("recovery.quality_score", verification.QualityScore);
         activity?.SetTag("recovery.requires_rollback", verification.RequiresRollback);
-        
+
         Telemetry.RecordActivity(Id, "recovery_started");
 
         var errorMessage = $"""
@@ -131,7 +133,7 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             Requires Rollback: {verification.RequiresRollback}
             """;
 
-        
+
         {
             var strategy = await DetermineRecoveryStrategyAsync(
                 verification.NodeId,
@@ -160,17 +162,17 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
         CancellationToken cancellationToken = default)
     {
         using var activity = ActivitySource.StartActivity("Agent.Recovery.ExecutionFailure");
-        
+
         activity?.SetTag("recovery.node_id", result.NodeId);
         activity?.SetTag("recovery.error_type", "execution_failure");
         activity?.SetTag("recovery.status", result.Status);
         activity?.SetTag("recovery.execution_time_ms", result.ExecutionTimeMs);
-        
+
         Telemetry.RecordActivity(Id, "recovery_started");
 
         var errorMessage = result.Error ?? "Unknown execution error";
 
-        
+
         {
             var strategy = await DetermineRecoveryStrategyAsync(
                 result.NodeId,
@@ -225,9 +227,8 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             - State restoration should be used for data integrity issues
             """;
 
-        var response = await _agent.RunAsync(prompt, _thread, cancellationToken: cancellationToken);
-
-        var strategy = JsonSerializer.Deserialize<RecoveryStrategy>(response.Text)!;
+        var strategy = await _llmService.InvokeStructuredAsync<RecoveryStrategy>(
+            _agent, _thread, prompt, cancellationToken);
 
         strategy.ErrorType = errorType;
 
@@ -242,21 +243,22 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
         IWorkflowContext context,
         CancellationToken cancellationToken)
     {
-        switch (strategy.RecoveryAction.ToLowerInvariant())
+        var action = EnumExtensions.ParseRecoveryAction(strategy.RecoveryAction);
+        switch (action)
         {
-            case "retry":
+            case RecoveryAction.Retry:
                 await HandleRetryAsync(strategy, context, cancellationToken);
                 break;
 
-            case "rollback":
+            case RecoveryAction.Rollback:
                 await HandleRollbackAsync(strategy, context, cancellationToken);
                 break;
 
-            case "skip":
+            case RecoveryAction.Skip:
                 await HandleSkipAsync(strategy, context, cancellationToken);
                 break;
 
-            case "escalate":
+            case RecoveryAction.Escalate:
                 await HandleEscalationAsync(strategy, context, cancellationToken);
                 break;
 
@@ -283,7 +285,7 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
                 new RecoveryActionEvent($"Max retries exceeded for {nodeId}, escalating..."),
                 cancellationToken);
 
-            strategy.RecoveryAction = "escalate";
+            strategy.RecoveryAction = RecoveryAction.Escalate.ToLowerString();
             await HandleEscalationAsync(strategy, context, cancellationToken);
             return;
         }
@@ -366,23 +368,4 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             _stateSnapshots.Push(state);
         }
     }
-}
-
-/// <summary>
-/// Event emitted when a recovery strategy is determined.
-/// </summary>
-public sealed class RecoveryStrategyDeterminedEvent(RecoveryStrategy strategy) : WorkflowEvent(strategy)
-{
-    public override string ToString() =>
-        $"Recovery Strategy: {strategy.RecoveryAction}\n" +
-        $"Root Cause: {strategy.RootCause}\n" +
-        $"State Restoration: {strategy.StateRestorationNeeded}";
-}
-
-/// <summary>
-/// Event emitted during recovery actions.
-/// </summary>
-public sealed class RecoveryActionEvent(string action) : WorkflowEvent(action)
-{
-    public override string ToString() => $"Recovery Action: {action}";
 }

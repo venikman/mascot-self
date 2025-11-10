@@ -3,6 +3,86 @@ using System.Text.Json.Serialization;
 namespace WorkflowCustomAgentExecutorsSample.Models;
 
 /// <summary>
+/// Type of workflow node.
+/// </summary>
+public enum NodeType
+{
+    ToolCall,
+    LlmInvocation,
+    Conditional
+}
+
+/// <summary>
+/// Status of an execution result.
+/// </summary>
+public enum ExecutionStatus
+{
+    Success,
+    Failure,
+    Partial
+}
+
+/// <summary>
+/// Recovery action to take for failures.
+/// </summary>
+public enum RecoveryAction
+{
+    Retry,
+    Rollback,
+    Skip,
+    Escalate
+}
+
+/// <summary>
+/// Complexity level of a workflow.
+/// </summary>
+public enum ComplexityLevel
+{
+    Low,
+    Medium,
+    High
+}
+
+/// <summary>
+/// Helper extensions for enum conversions.
+/// </summary>
+public static class EnumExtensions
+{
+    public static string ToLowerString(this NodeType type) => type.ToString().ToLowerInvariant();
+    public static string ToLowerString(this ExecutionStatus status) => status.ToString().ToLowerInvariant();
+    public static string ToLowerString(this RecoveryAction action) => action.ToString().ToLowerInvariant();
+    public static string ToLowerString(this ComplexityLevel level) => level.ToString().ToLowerInvariant();
+
+    public static ExecutionStatus ParseExecutionStatus(string status) =>
+        status.ToLowerInvariant() switch
+        {
+            "success" => ExecutionStatus.Success,
+            "failure" => ExecutionStatus.Failure,
+            "partial" => ExecutionStatus.Partial,
+            _ => ExecutionStatus.Failure
+        };
+
+    public static RecoveryAction ParseRecoveryAction(string action) =>
+        action.ToLowerInvariant() switch
+        {
+            "retry" => RecoveryAction.Retry,
+            "rollback" => RecoveryAction.Rollback,
+            "skip" => RecoveryAction.Skip,
+            "escalate" => RecoveryAction.Escalate,
+            _ => RecoveryAction.Escalate
+        };
+
+    public static NodeType ParseNodeType(string type) =>
+        type.ToLowerInvariant() switch
+        {
+            "tool_call" => NodeType.ToolCall,
+            "llm_invocation" => NodeType.LlmInvocation,
+            "conditional" => NodeType.Conditional,
+            _ => NodeType.LlmInvocation
+        };
+}
+
+/// <summary>
 /// Represents a node in a workflow DAG (Directed Acyclic Graph).
 /// </summary>
 public sealed class WorkflowNode

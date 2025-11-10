@@ -8,11 +8,12 @@ using Microsoft.Extensions.Logging;
 using OpenTelemetry;
 using OpenTelemetry.Context.Propagation;
 using OpenTelemetry.Exporter;
-using OpenTelemetry.Logs;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using WorkflowCustomAgentExecutorsSample;
+using AgentLmLocal.Configuration;
+using AgentLmLocal.Services;
+using Microsoft.Extensions.AI;
+using OpenAI;
+using System.ClientModel;
 using System;
 
 namespace AgentLmLocal;
@@ -46,6 +47,10 @@ public static class Program
 
         var builder = WebApplication.CreateBuilder(args);
 
+        // Load configuration from environment
+        var config = AgentConfiguration.FromEnvironment();
+        builder.Services.AddSingleton(config);
+
         // Logging
         builder.Logging.ClearProviders();
         builder.Logging.AddConsole();
@@ -54,87 +59,37 @@ public static class Program
             options.IncludeFormattedMessage = true;
             options.IncludeScopes = true;
 
-            var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
-                           ?? Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL")
-                           ?? "http://localhost:19149";
-
             options.AddOtlpExporter(otlpOptions =>
             {
-                otlpOptions.Endpoint = new Uri(endpoint);
+                otlpOptions.Endpoint = new Uri(config.OtlpEndpoint);
                 otlpOptions.Protocol = OtlpExportProtocol.HttpProtobuf;
             });
         });
 
-        // Services
+        // Configure OpenTelemetry
+        builder.Services.AddAgentTelemetry();
+
+        // Register core services
         builder.Services.AddSingleton<AgentInstrumentation>();
-        builder.Services.AddSingleton<AgenticWorkflowExample>();
         builder.Services.AddHostedService<StartupTelemetryPing>();
 
-        // OpenTelemetry
-        var serviceName = "agentlm-local";
-        var serviceVersion = "1.0.0";
-        var environment = Environment.GetEnvironmentVariable("DEPLOYMENT_ENVIRONMENT") ?? "development";
-        var instanceId = Environment.MachineName;
-        var samplingRatioEnv = Environment.GetEnvironmentVariable("OTEL_TRACE_SAMPLING_RATIO");
-        var samplingRatio = 1.0;
-        if (double.TryParse(samplingRatioEnv, out var parsedRatio))
+        // Register LLM client
+        builder.Services.AddSingleton<IChatClient>(sp =>
         {
-            samplingRatio = Math.Clamp(parsedRatio, 0.0, 1.0);
-        }
-
-        builder.Services.AddOpenTelemetry()
-            .ConfigureResource(resource => resource
-                .AddService(serviceName: serviceName, serviceVersion: serviceVersion)
-                .AddAttributes(new []
+            var lmStudioClient = new OpenAI.OpenAIClient(
+                new ApiKeyCredential(config.ApiKey),
+                new OpenAI.OpenAIClientOptions
                 {
-                    new KeyValuePair<string, object>("deployment.environment", environment),
-                    new KeyValuePair<string, object>("service.instance.id", instanceId)
-                }))
-            .WithTracing(tracing =>
-            {
-                tracing.AddSource("AgenticWorkflow")
-                       .AddHttpClientInstrumentation()
-                       .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(samplingRatio)))
-                       .AddOtlpExporter(otlpOptions =>
-                       {
-                           var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
-                                          ?? Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL")
-                                          ?? "http://localhost:19149";
-                           otlpOptions.Endpoint = new Uri(endpoint);
+                    Endpoint = new Uri(config.LmStudioEndpoint)
+                });
 
-                           var protocolEnv = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_PROTOCOL");
-                           if (!string.IsNullOrWhiteSpace(protocolEnv))
-                           {
-                               otlpOptions.Protocol = protocolEnv.Equals("grpc", StringComparison.OrdinalIgnoreCase)
-                                   ? OtlpExportProtocol.Grpc
-                                   : OtlpExportProtocol.HttpProtobuf;
-                           }
-                           else
-                           {
-                               var useGrpc = endpoint.StartsWith("https", StringComparison.OrdinalIgnoreCase);
-                               otlpOptions.Protocol = useGrpc ? OtlpExportProtocol.Grpc : OtlpExportProtocol.HttpProtobuf;
-                           }
-                       });
-            })
-            .WithMetrics(metrics =>
-            {
-                metrics.AddMeter("AgenticWorkflow")
-                       .AddRuntimeInstrumentation()
-                       .AddView(
-                           instrumentName: "agent.execution.duration",
-                           new ExplicitBucketHistogramConfiguration
-                           {
-                               Boundaries = new double[] { 5, 10, 20, 50, 100, 250, 500, 1000, 2000 }
-                           })
-                       .AddOtlpExporter(otlpOptions =>
-                       {
-                           var endpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT")
-                                          ?? Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL")
-                                          ?? "http://localhost:19149";
-                           otlpOptions.Endpoint = new Uri(endpoint);
-                           otlpOptions.Protocol = OtlpExportProtocol.HttpProtobuf;
-                       });
-            });
+            return lmStudioClient.GetChatClient(config.ModelId).AsIChatClient();
+        });
+
+        // Register agent services
+        builder.Services.AddSingleton<AgentFactory>();
+        builder.Services.AddSingleton<LlmService>();
+        builder.Services.AddSingleton<AgenticWorkflowExample>();
 
         var app = builder.Build();
 
