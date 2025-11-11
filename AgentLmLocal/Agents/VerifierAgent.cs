@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
@@ -41,15 +40,13 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
     /// <param name="id">A unique identifier for the verifier agent.</param>
     /// <param name="agentFactory">Factory for creating AI agents.</param>
     /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance for telemetry.</param>
-    /// <param name="telemetry">Telemetry instrumentation instance.</param>
+    /// <param name="logger">Logger instance.</param>
     public VerifierAgent(
         string id,
         AgentFactory agentFactory,
         LlmService llmService,
-        ILogger<VerifierAgent> logger,
-        AgentInstrumentation telemetry)
-        : base(id, logger, telemetry)
+        ILogger<VerifierAgent> logger)
+        : base(id, logger)
     {
         _llmService = llmService;
 
@@ -110,74 +107,43 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("Agent.Verifier.MultiVerification");
-
-        activity?.SetTag("verification.results.count", results.Count);
-        activity?.SetTag("verification.minimum_score", MinimumQualityScore);
-        activity?.SetTag("verification.speculative_enabled", EnableSpeculativeExecution);
-
-        Telemetry.RecordActivity(Id, "verification_started");
-
         var verificationResults = new List<VerificationResult>();
-        var passedVerifications = 0;
-        var failedVerifications = 0;
 
-
+        foreach (var result in results)
         {
-            foreach (var result in results)
+            var verification = await PerformVerificationAsync(result, cancellationToken);
+            verificationResults.Add(verification);
+
+            await context.AddEventAsync(new VerificationCompletedEvent(verification), cancellationToken);
+
+            // If critical failure detected, handle immediately
+            if (!verification.Passed && verification.RequiresRollback)
             {
-                var verification = await PerformVerificationAsync(result, cancellationToken);
-                verificationResults.Add(verification);
-
-                if (verification.Passed)
-                {
-                    passedVerifications++;
-                }
-                else
-                {
-                    failedVerifications++;
-                }
-
-                await context.AddEventAsync(new VerificationCompletedEvent(verification), cancellationToken);
-
-                // If critical failure detected, handle immediately
-                if (!verification.Passed && verification.RequiresRollback)
-                {
-                    activity?.SetTag("verification.critical_failure", true);
-                    activity?.SetTag("verification.failed_node", result.NodeId);
-                    await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
-                    return verification; // Return the critical failure result
-                }
+                await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
+                return verification; // Return the critical failure result
             }
-
-            // Find the lowest scoring result
-            var lowestScore = verificationResults.MinBy(v => v.QualityScore);
-            if (lowestScore != null && !lowestScore.Passed)
-            {
-                activity?.SetTag("verification.lowest_score", lowestScore.QualityScore);
-                await context.SendMessageAsync(lowestScore, cancellationToken: cancellationToken);
-                return lowestScore; // Return the failed result
-            }
-
-            activity?.SetTag("verification.passed_count", passedVerifications);
-            activity?.SetTag("verification.failed_count", failedVerifications);
-
-            Telemetry.RecordActivity(Id, "verification_completed");
-
-            // All passed - send success signal
-            await context.YieldOutputAsync(
-                $"Verification passed: {verificationResults.Count} results verified successfully.",
-                cancellationToken);
-
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return verificationResults.FirstOrDefault() ?? new VerificationResult
-            {
-                NodeId = "multi_verification",
-                Passed = true,
-                QualityScore = 10,
-                Feedback = "All verifications passed successfully"
-            };
         }
+
+        // Find the lowest scoring result
+        var lowestScore = verificationResults.MinBy(v => v.QualityScore);
+        if (lowestScore != null && !lowestScore.Passed)
+        {
+            await context.SendMessageAsync(lowestScore, cancellationToken: cancellationToken);
+            return lowestScore; // Return the failed result
+        }
+
+        // All passed - send success signal
+        await context.YieldOutputAsync(
+            $"Verification passed: {verificationResults.Count} results verified successfully.",
+            cancellationToken);
+
+        return verificationResults.FirstOrDefault() ?? new VerificationResult
+        {
+            NodeId = "multi_verification",
+            Passed = true,
+            QualityScore = 10,
+            Feedback = "All verifications passed successfully"
+        };
     }
 
     private async ValueTask<VerificationResult> VerifySingleAsync(
@@ -185,40 +151,23 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         IWorkflowContext context,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("Agent.Verifier.SingleVerification");
+        var verification = await PerformVerificationAsync(result, cancellationToken);
 
-        activity?.SetTag("verification.node_id", result.NodeId);
-        activity?.SetTag("verification.minimum_score", MinimumQualityScore);
-        activity?.SetTag("verification.speculative_enabled", EnableSpeculativeExecution);
+        await context.AddEventAsync(new VerificationCompletedEvent(verification), cancellationToken);
 
-        Telemetry.RecordActivity(Id, "verification_started");
-
+        if (!verification.Passed)
         {
-            var verification = await PerformVerificationAsync(result, cancellationToken);
-
-            activity?.SetTag("verification.quality_score", verification.QualityScore);
-            activity?.SetTag("verification.passed", verification.Passed);
-            activity?.SetTag("verification.requires_rollback", verification.RequiresRollback);
-
-            await context.AddEventAsync(new VerificationCompletedEvent(verification), cancellationToken);
-
-            if (!verification.Passed)
-            {
-                Telemetry.RecordActivity(Id, "verification_failed");
-                // Send to recovery handler
-                await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
-            }
-            else
-            {
-                Telemetry.RecordActivity(Id, "verification_completed");
-                await context.YieldOutputAsync(
-                    $"Verification passed for node {result.NodeId} (score: {verification.QualityScore}/10)",
-                    cancellationToken);
-            }
-
-            activity?.SetStatus(verification.Passed ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
-            return verification;
+            // Send to recovery handler
+            await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
         }
+        else
+        {
+            await context.YieldOutputAsync(
+                $"Verification passed for node {result.NodeId} (score: {verification.QualityScore}/10)",
+                cancellationToken);
+        }
+
+        return verification;
     }
 
     /// <summary>

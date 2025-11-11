@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.Logging;
@@ -31,15 +30,13 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
     /// <param name="id">A unique identifier for the planner agent.</param>
     /// <param name="agentFactory">Factory for creating AI agents.</param>
     /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance for telemetry.</param>
-    /// <param name="telemetry">Telemetry instrumentation instance.</param>
+    /// <param name="logger">Logger instance.</param>
     public PlannerAgent(
         string id,
         AgentFactory agentFactory,
         LlmService llmService,
-        ILogger<PlannerAgent> logger,
-        AgentInstrumentation telemetry)
-        : base(id, logger, telemetry)
+        ILogger<PlannerAgent> logger)
+        : base(id, logger)
     {
         _llmService = llmService;
 
@@ -71,41 +68,24 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
     }
 
     /// <summary>
-    /// Handles incoming task requests and generates workflow plans with telemetry instrumentation.
+    /// Handles incoming task requests and generates workflow plans.
     /// </summary>
     protected override async ValueTask ExecuteInstrumentedAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("Agent.Planner.PlanGeneration");
+        var prompt = $"""
+            Task: {message}
 
-        activity?.SetTag("task.content", message);
-        activity?.SetTag("task.length", message.Length);
+            Please create a detailed workflow plan for this task. Break it down into specific steps
+            with clear dependencies and execution order.
+            """;
 
-        Telemetry.RecordActivity(Id, "planning_started");
+        var plan = await _llmService.InvokeStructuredAsync<WorkflowPlan>(
+            _agent, _thread, prompt, cancellationToken);
 
+        // Emit event for monitoring
+        await context.AddEventAsync(new PlanGeneratedEvent(plan), cancellationToken);
 
-        {
-            var prompt = $"""
-                Task: {message}
-
-                Please create a detailed workflow plan for this task. Break it down into specific steps
-                with clear dependencies and execution order.
-                """;
-
-            var plan = await _llmService.InvokeStructuredAsync<WorkflowPlan>(
-                _agent, _thread, prompt, cancellationToken);
-
-            activity?.SetTag("plan.nodes.count", plan.Nodes.Count);
-            activity?.SetTag("plan.complexity", plan.EstimatedComplexity);
-
-            Telemetry.RecordActivity(Id, "planning_completed");
-
-            // Emit event for monitoring
-            await context.AddEventAsync(new PlanGeneratedEvent(plan), cancellationToken);
-
-            // Send the plan to the next executor
-            await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
-
-            activity?.SetStatus(ActivityStatusCode.Ok);
-        }
+        // Send the plan to the next executor
+        await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
     }
 }
