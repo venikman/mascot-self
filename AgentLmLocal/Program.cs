@@ -1,16 +1,19 @@
 using Azure.AI.OpenAI;
+using AgentLmLocal.Configuration;
+using AgentLmLocal.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using WorkflowCustomAgentExecutorsSample;
-using AgentLmLocal.Configuration;
-using AgentLmLocal.Services;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using System.ClientModel;
 using System;
+using JsonLines.Logging;
+using OpenTelemetry;
+using OpenTelemetry.Logs;
+using WorkflowCustomAgentExecutorsSample;
 
 namespace AgentLmLocal;
 
@@ -19,6 +22,14 @@ public static class Program
     private static Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
+
+        builder.Logging.AddOpenTelemetry(logging =>
+        {
+            logging.IncludeFormattedMessage = true;
+            logging.IncludeScopes = true;
+            logging.ParseStateValues = true;
+            logging.AddJsonLinesExporter();
+        });
 
         var config = AgentConfiguration.FromEnvironment();
         builder.Services.AddSingleton(config);

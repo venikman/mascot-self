@@ -60,7 +60,7 @@ If you're routing through a proxy, point `AZURE_OPENAI_ENDPOINT` at the proxy UR
 
 3. **Access the endpoints**:
    - Health check: `http://localhost:5000/health`
-   - Trigger workflow: `curl -X POST http://localhost:5000/run`
+   - Trigger workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Plan a local AI meetup"}'`
    - Check workflow status: `curl http://localhost:5000/runs/{workflowId}`
 
 The POST response includes a `workflowId` and a `Location` header. Use those values with the `/runs/{workflowId}` endpoint to poll status (events, outputs, and errors) instead of tailing the console. Every log line and status update is tagged with the workflow ID for easier correlation.
