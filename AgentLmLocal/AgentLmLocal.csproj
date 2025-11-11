@@ -7,6 +7,7 @@
     <FormatOnSave>true</FormatOnSave>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-preview.251107.1" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.0.0-preview.251107.1" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="9.10.2" />

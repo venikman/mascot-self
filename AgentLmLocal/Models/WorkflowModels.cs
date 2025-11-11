@@ -47,8 +47,14 @@ public static class EnumExtensions
             _ => ExecutionStatus.Failure
         };
 
-    public static RecoveryAction ParseRecoveryAction(string action) =>
-        action.ToLowerInvariant() switch
+    public static RecoveryAction ParseRecoveryAction(string? action)
+    {
+        if (string.IsNullOrWhiteSpace(action))
+        {
+            return RecoveryAction.Escalate;
+        }
+
+        return action.ToLowerInvariant() switch
         {
             "retry" => RecoveryAction.Retry,
             "rollback" => RecoveryAction.Rollback,
@@ -56,6 +62,7 @@ public static class EnumExtensions
             "escalate" => RecoveryAction.Escalate,
             _ => RecoveryAction.Escalate
         };
+    }
 
     public static NodeType ParseNodeType(string type) =>
         type.ToLowerInvariant() switch

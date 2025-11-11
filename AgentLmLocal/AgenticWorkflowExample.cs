@@ -1,9 +1,11 @@
 using System;
+using System.Linq;
 using Microsoft.Agents.AI.Workflows;
 using WorkflowCustomAgentExecutorsSample.Agents;
 using AgentLmLocal.Configuration;
 using AgentLmLocal.Services;
 using AgentLmLocal.Workflow;
+using Microsoft.Extensions.Logging;
 
 namespace WorkflowCustomAgentExecutorsSample;
 
@@ -12,21 +14,27 @@ public class AgenticWorkflowExample
     private readonly AgentConfiguration _config;
     private readonly AgentFactory _agentFactory;
     private readonly LlmService _llmService;
+    private readonly RunTracker _runTracker;
+    private readonly ILogger<AgenticWorkflowExample> _logger;
 
     public AgenticWorkflowExample(
         AgentConfiguration config,
         AgentFactory agentFactory,
-        LlmService llmService)
+        LlmService llmService,
+        RunTracker runTracker,
+        ILogger<AgenticWorkflowExample> logger)
     {
         _config = config;
         _agentFactory = agentFactory;
         _llmService = llmService;
+        _runTracker = runTracker;
+        _logger = logger;
     }
     
-    public async Task RunWorkflowAsync(string task)
+    public async Task RunWorkflowAsync(string workflowId, string task, CancellationToken cancellationToken = default)
     {
         var workflow = BuildWorkflow();
-        await RunWorkflowExample(workflow, task);
+        await RunWorkflowExample(workflowId, workflow, task, cancellationToken);
     }
 
     private Workflow BuildWorkflow()
@@ -59,21 +67,35 @@ public class AgenticWorkflowExample
             .Build();
     }
 
-    private async Task RunWorkflowExample(Workflow workflow, string task)
+    private async Task RunWorkflowExample(string workflowId, Workflow workflow, string task, CancellationToken cancellationToken)
     {
-        Console.WriteLine("Starting workflow execution for task: {0}", task);
+        Console.WriteLine("Workflow {0} starting. Task: {1}", workflowId, task);
+        _logger.LogInformation("Workflow {WorkflowId} executing task \"{Task}\"", workflowId, task);
 
-        var eventHandler = new WorkflowEventHandler();
+        var eventHandler = new WorkflowEventHandler(workflowId, _runTracker);
 
-        await using var run = await InProcessExecution.StreamAsync(workflow, input: task);
-        await foreach (WorkflowEvent evt in run.WatchStreamAsync())
+        try
         {
-            await eventHandler.HandleEventAsync(evt);
+            await using var run = await InProcessExecution.StreamAsync(workflow, input: task, cancellationToken: cancellationToken);
+            await foreach (WorkflowEvent evt in run.WatchStreamAsync(cancellationToken))
+            {
+                await eventHandler.HandleEventAsync(evt);
+            }
+
+            var eventCounts = eventHandler.GetEventCounts();
+
+            _runTracker.MarkCompleted(workflowId);
+
+            var summary = string.Join(", ", eventCounts.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+
+            Console.WriteLine("Workflow {0} completed successfully. Events: {1}", workflowId, summary);
+            _logger.LogInformation("Workflow {WorkflowId} finished. {Summary}", workflowId, summary);
         }
-
-        var eventCounts = eventHandler.GetEventCounts();
-
-        Console.WriteLine("Workflow completed successfully. Events: {0}",
-            string.Join(", ", eventCounts.Select(kvp => $"{kvp.Key}: {kvp.Value}")));
+        catch (Exception ex)
+        {
+            _runTracker.MarkFailed(workflowId, ex);
+            Console.WriteLine("Workflow {0} failed: {1}", workflowId, ex.Message);
+            _logger.LogError(ex, "Workflow {WorkflowId} failed", workflowId);
+        }
     }
 }
