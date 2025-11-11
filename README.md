@@ -60,7 +60,7 @@ If you're routing through a proxy, point `AZURE_OPENAI_ENDPOINT` at the proxy UR
 
 3. **Access the endpoints**:
    - Health check: `http://localhost:5000/health`
-   - Trigger workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Plan a local AI meetup"}'`
+   - Trigger workflow: `curl -X POST http://localhost:5000/run`
    - Check workflow status: `curl http://localhost:5000/runs/{workflowId}`
 
 The POST response includes a `workflowId` and a `Location` header. Use those values with the `/runs/{workflowId}` endpoint to poll status (events, outputs, and errors) instead of tailing the console. Every log line and status update is tagged with the workflow ID for easier correlation.
@@ -73,6 +73,25 @@ The POST response includes a `workflowId` and a `Location` header. Use those val
   - `Services/` - Shared services (LLM service, Agent factory)
   - `Workflow/` - Workflow event handling
   - `Configuration/` - Application configuration
+- `docs/` - Documentation
+  - `SERILOG-OTEL-HYBRID.md` - Logging architecture documentation
+
+## Observability
+
+This application uses a **hybrid observability approach**:
+
+- **Serilog** for structured logging (JSON Lines to stdout)
+- **OpenTelemetry** for distributed tracing
+- **Automatic correlation** via TraceId/SpanId in logs
+
+All logs are output in [Compact JSON format](https://github.com/serilog/serilog-formatting-compact) (one JSON object per line), making them ideal for log aggregation systems like Splunk, Elasticsearch, or CloudWatch.
+
+**Example log output:**
+```json
+{"@t":"2025-11-11T14:30:45.123Z","@mt":"Workflow {WorkflowId} executing","@l":"Information","WorkflowId":"abc123","ServiceName":"AgentLmLocal","TraceId":"4bf92f3577b34da6","SpanId":"00f067aa0ba902b7"}
+```
+
+For complete details, see [docs/SERILOG-OTEL-HYBRID.md](docs/SERILOG-OTEL-HYBRID.md).
 
 ## How It Works
 

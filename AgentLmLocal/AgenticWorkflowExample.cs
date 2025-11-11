@@ -30,7 +30,7 @@ public class AgenticWorkflowExample
         _runTracker = runTracker;
         _logger = logger;
     }
-    
+
     public async Task RunWorkflowAsync(string workflowId, string task, CancellationToken cancellationToken = default)
     {
         var workflow = BuildWorkflow();

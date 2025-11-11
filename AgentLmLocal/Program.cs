@@ -10,9 +10,12 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using System.ClientModel;
 using System;
-using JsonLines.Logging;
 using OpenTelemetry;
-using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using Serilog;
+using Serilog.Enrichers.Span;
+using Serilog.Formatting.Compact;
 using WorkflowCustomAgentExecutorsSample;
 
 namespace AgentLmLocal;
@@ -23,13 +26,39 @@ public static class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        builder.Logging.AddOpenTelemetry(logging =>
-        {
-            logging.IncludeFormattedMessage = true;
-            logging.IncludeScopes = true;
-            logging.ParseStateValues = true;
-            logging.AddJsonLinesExporter();
-        });
+        // Configure Serilog for structured logging to stdout
+        builder.Host.UseSerilog((context, services, configuration) => configuration
+            .ReadFrom.Configuration(context.Configuration)
+            .ReadFrom.Services(services)
+            .Enrich.FromLogContext()
+            .Enrich.WithSpan()  // Adds TraceId/SpanId from OpenTelemetry
+            .Enrich.WithMachineName()
+            .Enrich.WithEnvironmentName()
+            .Enrich.WithProperty("ServiceName", "AgentLmLocal")
+            .WriteTo.Console(new CompactJsonFormatter()));
+
+        // Configure OpenTelemetry for distributed tracing
+        builder.Services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService("AgentLmLocal", serviceVersion: "1.0.0")
+                .AddAttributes(new Dictionary<string, object>
+                {
+                    ["deployment.environment"] = builder.Environment.EnvironmentName,
+                    ["service.namespace"] = "multi-agent-workflow"
+                }))
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation(options =>
+                {
+                    options.RecordException = true;
+                    options.Filter = httpContext =>
+                        !httpContext.Request.Path.StartsWithSegments("/health");
+                })
+                .AddHttpClientInstrumentation(options =>
+                {
+                    options.RecordException = true;
+                })
+                .AddSource("AgentLmLocal")
+                .AddSource("Microsoft.Agents.AI.*"));
 
         var config = AgentConfiguration.FromEnvironment();
         builder.Services.AddSingleton(config);
