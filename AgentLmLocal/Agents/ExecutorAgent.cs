@@ -38,15 +38,13 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     /// <param name="id">A unique identifier for the executor agent.</param>
     /// <param name="agentFactory">Factory for creating AI agents.</param>
     /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance for telemetry.</param>
-    /// <param name="telemetry">Telemetry instrumentation instance.</param>
+    /// <param name="logger">Logger instance.</param>
     public ExecutorAgent(
         string id,
         AgentFactory agentFactory,
         LlmService llmService,
-        ILogger<ExecutorAgent> logger,
-        AgentInstrumentation telemetry)
-        : base(id, logger, telemetry)
+        ILogger<ExecutorAgent> logger)
+        : base(id, logger)
     {
         _llmService = llmService;
 
@@ -76,90 +74,61 @@ public sealed class ExecutorAgent : InstrumentedAgent<WorkflowPlan>
     }
 
     /// <summary>
-    /// Handles workflow plan execution with telemetry instrumentation.
+    /// Handles workflow plan execution.
     /// </summary>
     protected override async ValueTask ExecuteInstrumentedAsync(WorkflowPlan plan, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        using var activity = ActivitySource.StartActivity("Agent.Executor.PlanExecution");
-
-        activity?.SetTag("plan.nodes.total", plan.Nodes.Count);
-        activity?.SetTag("plan.execution_order.count", plan.ExecutionOrder.Count);
-
-        Telemetry.RecordActivity(Id, "execution_started");
-
         var results = new List<ExecutionResult>();
-        var successfulExecutions = 0;
-        var failedExecutions = 0;
 
-
+        foreach (var nodeId in plan.ExecutionOrder)
         {
-            foreach (var nodeId in plan.ExecutionOrder)
+            var node = plan.Nodes.FirstOrDefault(n => n.Id == nodeId);
+            if (node == null)
             {
-                var node = plan.Nodes.FirstOrDefault(n => n.Id == nodeId);
-                if (node == null)
-                {
-                    await context.AddEventAsync(
-                        new ExecutionErrorEvent($"Node {nodeId} not found in plan"),
-                        cancellationToken);
-                    continue;
-                }
-
-                // Execute the node
-                var result = await ExecuteNodeAsync(node, plan, cancellationToken);
-                results.Add(result);
-
-                if (result.Status == ExecutionStatus.Success.ToLowerString())
-                {
-                    successfulExecutions++;
-                }
-                else
-                {
-                    failedExecutions++;
-                }
-
-                // Emit execution event
-                await context.AddEventAsync(new NodeExecutedEvent(result), cancellationToken);
-
-                // Store result in state for dependent nodes
-                _executionState[nodeId] = result;
-                _nodesExecuted++;
-
-                // Check if verification is needed
-                if (_nodesExecuted >= VerificationInterval)
-                {
-                    // Send results for verification
-                    await context.SendMessageAsync(results, cancellationToken: cancellationToken);
-                    _nodesExecuted = 0;
-                    results.Clear();
-                }
-
-                // Stop if execution failed
-                if (result.Status == ExecutionStatus.Failure.ToLowerString())
-                {
-                    await context.SendMessageAsync(result, cancellationToken: cancellationToken);
-                    activity?.SetTag("execution.failed_at_node", nodeId);
-                    break;
-                }
+                await context.AddEventAsync(
+                    new ExecutionErrorEvent($"Node {nodeId} not found in plan"),
+                    cancellationToken);
+                continue;
             }
 
-            // Send any remaining results
-            if (results.Count > 0)
+            // Execute the node
+            var result = await ExecuteNodeAsync(node, plan, cancellationToken);
+            results.Add(result);
+
+            // Emit execution event
+            await context.AddEventAsync(new NodeExecutedEvent(result), cancellationToken);
+
+            // Store result in state for dependent nodes
+            _executionState[nodeId] = result;
+            _nodesExecuted++;
+
+            // Check if verification is needed
+            if (_nodesExecuted >= VerificationInterval)
             {
+                // Send results for verification
                 await context.SendMessageAsync(results, cancellationToken: cancellationToken);
+                _nodesExecuted = 0;
+                results.Clear();
             }
 
-            activity?.SetTag("execution.successful_nodes", successfulExecutions);
-            activity?.SetTag("execution.failed_nodes", failedExecutions);
-
-            Telemetry.RecordActivity(Id, "execution_completed");
-
-            // Emit completion event
-            await context.YieldOutputAsync(
-                $"Workflow execution completed: {plan.Nodes.Count} nodes executed successfully.",
-                cancellationToken);
-
-            activity?.SetStatus(ActivityStatusCode.Ok);
+            // Stop if execution failed
+            if (result.Status == ExecutionStatus.Failure.ToLowerString())
+            {
+                await context.SendMessageAsync(result, cancellationToken: cancellationToken);
+                break;
+            }
         }
+
+        // Send any remaining results
+        if (results.Count > 0)
+        {
+            await context.SendMessageAsync(results, cancellationToken: cancellationToken);
+        }
+
+        // Emit completion event
+        await context.YieldOutputAsync(
+            $"Workflow execution completed: {plan.Nodes.Count} nodes executed successfully.",
+            cancellationToken);
     }
 
     /// <summary>

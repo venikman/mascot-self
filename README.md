@@ -1,58 +1,67 @@
-# .NET Aspire Agentic Demo (Streamlined)
+# Multi-Agent Workflow System
 
-A compact multi-agent demo with .NET Aspire and OpenTelemetry. Minimal scripts, clear endpoints, easy local runs.
+A multi-agent system demonstrating coordinated planning, execution, verification, and recovery using .NET and AI workflows.
 
-## Quick Start
+## Overview
 
-- Make scripts executable:
-  ```bash
-  chmod +x start-aspire-agents.sh resolve-port-conflicts.sh run-agent-standalone.sh test.sh
-  ```
-- Start Aspire stack (Redis, Postgres, Agent):
-  ```bash
-  ./start-aspire-agents.sh
-  ```
-- Dashboard: `http://localhost:15045`
-- Agent:
-  - Health: `http://localhost:5088/health`
-  - Trigger run: `curl -X POST http://localhost:5088/run`
-- Simple checks:
-  ```bash
-  ./test.sh
-  ```
+This system showcases how multiple AI agents work together through a workflow pattern:
 
-## Standalone Agent (no Aspire)
+1. **PlannerAgent**: Decomposes complex tasks into multi-step DAGs (Directed Acyclic Graphs)
+2. **ExecutorAgent**: Implements planned steps by invoking tools and APIs
+3. **VerifierAgent**: Evaluates execution quality using LLM-as-a-judge pattern
+4. **RecoveryHandlerAgent**: Manages exceptions and implements recovery strategies
 
-- Start only the agent web server:
-  ```bash
-  ./run-agent-standalone.sh
-  ```
-- Then:
-  ```bash
-  curl http://localhost:5088/health
-  curl -X POST http://localhost:5088/run
-  ```
+## Prerequisites
 
-## Monitoring
+- .NET 9.0 SDK
+- LM Studio (or compatible OpenAI API endpoint) running locally or remotely
+- A language model that supports structured JSON outputs
 
-- The agent exports traces, metrics, and logs via OTLP when the Aspire dashboard is running.
-- Primary dashboard URL: `http://localhost:15045`
+## Configuration
 
-## Troubleshooting
+Configure the following environment variables (or use defaults):
 
-- Free up ports before starting:
-  ```bash
-  ./resolve-port-conflicts.sh
-  ```
-- If HTTPS profile causes HTTP/2 negotiation errors, use the HTTP profile (default in `start-aspire-agents.sh`).
+- `LMSTUDIO_ENDPOINT`: The API endpoint (default: `http://localhost:1234/v1`)
+- `LMSTUDIO_API_KEY`: API key for authentication (default: `lm-studio`)
+- `LMSTUDIO_MODEL`: The model ID to use (default: `openai/gpt-oss-20b`)
+- `MINIMUM_RATING`: Minimum quality rating for verification (default: 7)
+- `MAX_ATTEMPTS`: Maximum retry attempts for recovery (default: 3)
 
-## Notes
+## Running the Application
 
-- Agent service is bound directly to `http://0.0.0.0:5088` and reachable at `http://localhost:5088`.
-- Minimal script set retained:
-  - `start-aspire-agents.sh` — main entry point
-  - `resolve-port-conflicts.sh` — frees dashboard and agent ports
-  - `run-agent-standalone.sh` — fallback when Aspire isn’t available
-  - `test.sh` — quick health and run checks
+1. **Build the application**:
+   ```bash
+   cd AgentLmLocal
+   dotnet build
+   ```
 
-Happy building!
+2. **Run the application**:
+   ```bash
+   dotnet run
+   ```
+
+3. **Access the endpoints**:
+   - Health check: `http://localhost:5000/health`
+   - Trigger workflow: `curl -X POST http://localhost:5000/run`
+
+## Project Structure
+
+- `AgentLmLocal/` - Main application
+  - `Agents/` - Agent implementations (Planner, Executor, Verifier, Recovery)
+  - `Models/` - Data models and schemas
+  - `Services/` - Shared services (LLM service, Agent factory)
+  - `Workflow/` - Workflow event handling
+  - `Configuration/` - Application configuration
+
+## How It Works
+
+1. User submits a complex task
+2. PlannerAgent analyzes and creates a DAG-based execution plan
+3. ExecutorAgent executes each node in the plan
+4. VerifierAgent checks the quality of execution results
+5. RecoveryHandlerAgent handles failures with retry, rollback, skip, or escalate strategies
+6. Results are returned to the user
+
+## Based On
+
+This implementation is based on agentic workflow patterns from AI research.
