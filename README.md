@@ -19,11 +19,29 @@ This system showcases how multiple AI agents work together through a workflow pa
 
 ## Configuration
 
-Configure the following environment variables (or use defaults):
+### Provider selection
 
-- `LMSTUDIO_ENDPOINT`: The API endpoint (default: `http://localhost:1234/v1`)
+- `LLM_PROVIDER`: `LmStudio` (default) or `AzureOpenAI`. This controls which chat client is registered.
+
+### LM Studio / local OpenAI-compatible endpoints
+
+- `LMSTUDIO_ENDPOINT`: API endpoint (default: `http://localhost:1234/v1`)
 - `LMSTUDIO_API_KEY`: API key for authentication (default: `lm-studio`)
-- `LMSTUDIO_MODEL`: The model ID to use (default: `openai/gpt-oss-20b`)
+- `LMSTUDIO_MODEL`: Model ID to use (default: `openai/gpt-oss-20b`)
+
+### Azure OpenAI or proxy frontends
+
+Set `LLM_PROVIDER=AzureOpenAI` and supply:
+
+- `AZURE_OPENAI_ENDPOINT`: Base URL for your Azure OpenAI resource or proxy
+- `AZURE_OPENAI_API_KEY`: API key (or proxy-issued key) to authenticate requests
+- `AZURE_OPENAI_DEPLOYMENT`: Deployment name (maps to the chat model to invoke)
+- `AZURE_OPENAI_API_VERSION`: Optional service version. Accepts either the enum name (`V2024_10_21`) or the raw version string (`2024-10-21-preview`). The latest supported version is used if omitted or unrecognized.
+
+If you're routing through a proxy, point `AZURE_OPENAI_ENDPOINT` at the proxy URL—it must forward requests using the Azure OpenAI REST surface so the SDK can attach the required `api-version`.
+
+### Shared agent tuning
+
 - `MINIMUM_RATING`: Minimum quality rating for verification (default: 7)
 - `MAX_ATTEMPTS`: Maximum retry attempts for recovery (default: 3)
 
@@ -43,6 +61,9 @@ Configure the following environment variables (or use defaults):
 3. **Access the endpoints**:
    - Health check: `http://localhost:5000/health`
    - Trigger workflow: `curl -X POST http://localhost:5000/run`
+   - Check workflow status: `curl http://localhost:5000/runs/{workflowId}`
+
+The POST response includes a `workflowId` and a `Location` header. Use those values with the `/runs/{workflowId}` endpoint to poll status (events, outputs, and errors) instead of tailing the console. Every log line and status update is tagged with the workflow ID for easier correlation.
 
 ## Project Structure
 
