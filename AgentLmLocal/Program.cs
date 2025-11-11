@@ -1,10 +1,7 @@
-// Copyright (c) Microsoft. All rights reserved.
-
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample;
 using AgentLmLocal.Configuration;
 using AgentLmLocal.Services;
@@ -15,36 +12,15 @@ using System;
 
 namespace AgentLmLocal;
 
-/// <summary>
-/// Entry point for the agentic workflow system.
-/// Runs a multi-agent workflow demonstrating coordinated planning, execution,
-/// verification, recovery, and knowledge retrieval.
-/// </summary>
-/// <remarks>
-/// Pre-requisites:
-/// - LM Studio (or compatible OpenAI API endpoint) running locally or remotely.
-/// - A language model that supports structured JSON outputs.
-///
-/// Optional environment variables:
-/// - LMSTUDIO_ENDPOINT: The API endpoint (default: http://localhost:1234/v1)
-/// - LMSTUDIO_API_KEY: API key for authentication (default: lm-studio)
-/// - LMSTUDIO_MODEL: The model ID to use (default: openai/gpt-oss-20b)
-/// </remarks>
 public static class Program
 {
     private static Task Main(string[] args)
     {
         var builder = WebApplication.CreateBuilder(args);
 
-        // Load configuration from environment
         var config = AgentConfiguration.FromEnvironment();
         builder.Services.AddSingleton(config);
 
-        // Logging
-        builder.Logging.ClearProviders();
-        builder.Logging.AddConsole();
-
-        // Register LLM client
         builder.Services.AddSingleton<IChatClient>(sp =>
         {
             var lmStudioClient = new OpenAI.OpenAIClient(
@@ -57,7 +33,6 @@ public static class Program
             return lmStudioClient.GetChatClient(config.ModelId).AsIChatClient();
         });
 
-        // Register agent services
         builder.Services.AddSingleton<AgentFactory>();
         builder.Services.AddSingleton<LlmService>();
         builder.Services.AddSingleton<AgenticWorkflowExample>();
@@ -66,17 +41,17 @@ public static class Program
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
-        app.MapPost("/run", async (AgenticWorkflowExample example, ILoggerFactory loggerFactory) =>
+        app.MapPost("/run", (AgenticWorkflowExample example, RunRequest request) =>
         {
-            var logger = loggerFactory.CreateLogger("AgentRunEndpoint");
             var workflowId = Guid.NewGuid().ToString("N");
-            logger.LogInformation("Received /run request. Starting workflow: {WorkflowId}", workflowId);
 
-            _ = Task.Run(() => example.RunExample());
+            _ = Task.Run(() => example.RunWorkflowAsync(request.Task));
 
             return Results.Accepted($"/runs/{workflowId}", new { workflowId, status = "started" });
         });
 
         return app.RunAsync();
     }
+
+    private sealed record RunRequest(string Task);
 }

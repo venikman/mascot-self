@@ -1,23 +1,14 @@
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 
 namespace AgentLmLocal.Workflow;
 
-/// <summary>
-/// Handles workflow events with logging.
-/// </summary>
 public sealed class WorkflowEventHandler
 {
-    private readonly ILogger _logger;
     private readonly Dictionary<string, int> _eventCounts;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="WorkflowEventHandler"/> class.
-    /// </summary>
-    public WorkflowEventHandler(ILogger logger)
+    public WorkflowEventHandler()
     {
-        _logger = logger;
         _eventCounts = new Dictionary<string, int>
         {
             [nameof(PlanGeneratedEvent)] = 0,
@@ -29,15 +20,10 @@ public sealed class WorkflowEventHandler
         };
     }
 
-    /// <summary>
-    /// Handles a workflow event.
-    /// </summary>
     public async Task HandleEventAsync(WorkflowEvent evt)
     {
         var eventType = evt.GetType().Name;
         _eventCounts[eventType] = _eventCounts.GetValueOrDefault(eventType, 0) + 1;
-
-        _logger.LogDebug("Workflow event: {EventType} - {EventDetails}", eventType, evt);
 
         switch (evt)
         {
@@ -73,9 +59,6 @@ public sealed class WorkflowEventHandler
         await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Gets the event count summary.
-    /// </summary>
     public Dictionary<string, int> GetEventCounts() => new(_eventCounts);
 
     private void HandlePlanGenerated(PlanGeneratedEvent evt)

@@ -1,38 +1,17 @@
 namespace AgentLmLocal.Configuration;
 
-/// <summary>
-/// Centralized configuration for the agent system.
-/// </summary>
 public sealed class AgentConfiguration
 {
-    /// <summary>
-    /// LM Studio or OpenAI-compatible API endpoint.
-    /// </summary>
     public string LmStudioEndpoint { get; init; } = "http://localhost:1234/v1";
 
-    /// <summary>
-    /// API key for authentication.
-    /// </summary>
     public string ApiKey { get; init; } = "lm-studio";
 
-    /// <summary>
-    /// The model ID to use for LLM operations.
-    /// </summary>
     public string ModelId { get; init; } = "openai/gpt-oss-20b";
 
-    /// <summary>
-    /// Minimum quality rating required for verification (1-10).
-    /// </summary>
     public int MinimumRating { get; init; } = 7;
 
-    /// <summary>
-    /// Maximum number of refinement attempts.
-    /// </summary>
     public int MaxAttempts { get; init; } = 3;
 
-    /// <summary>
-    /// Creates an AgentConfiguration instance from environment variables.
-    /// </summary>
     public static AgentConfiguration FromEnvironment()
     {
         var minimumRatingEnv = Environment.GetEnvironmentVariable("MINIMUM_RATING");

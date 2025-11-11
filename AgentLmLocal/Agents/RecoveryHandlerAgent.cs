@@ -1,23 +1,14 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 using AgentLmLocal;
 using AgentLmLocal.Services;
 using AgentLmLocal.Workflow;
+using WorkflowRouteBuilder = Microsoft.Agents.AI.Workflows.RouteBuilder;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
-/// <summary>
-/// RecoveryHandlerAgent: Manages exceptions and implements recovery strategies.
-///
-/// This agent handles runtime failures by analyzing root causes, determining
-/// appropriate recovery patterns (retry, rollback, skip, escalate), and executing
-/// state restoration when needed.
-///
-/// Based on the agentic workflows pattern described in the research paper.
-/// </summary>
 public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 {
     private readonly AIAgent _agent;
@@ -26,29 +17,15 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
     private readonly Dictionary<string, int> _retryCount = [];
     private readonly Stack<object> _stateSnapshots = new();
 
-    /// <summary>
-    /// Maximum number of retry attempts before escalation.
-    /// </summary>
     public int MaxRetries { get; init; } = 3;
 
-    /// <summary>
-    /// Whether to automatically capture state snapshots for rollback.
-    /// </summary>
     public bool EnableStateSnapshots { get; init; } = true;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="RecoveryHandlerAgent"/> class.
-    /// </summary>
-    /// <param name="id">A unique identifier for the recovery handler agent.</param>
-    /// <param name="agentFactory">Factory for creating AI agents.</param>
-    /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance.</param>
     public RecoveryHandlerAgent(
         string id,
         AgentFactory agentFactory,
-        LlmService llmService,
-        ILogger<RecoveryHandlerAgent> logger)
-        : base(id, logger)
+        LlmService llmService)
+        : base(id)
     {
         _llmService = llmService;
 
@@ -82,13 +59,10 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             ChatResponseFormat.ForJsonSchema<RecoveryStrategy>());
     }
 
-    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
+    protected override WorkflowRouteBuilder ConfigureRoutes(WorkflowRouteBuilder routeBuilder) =>
         routeBuilder.AddHandler<VerificationResult, RecoveryStrategy>(this.HandleVerificationFailureAsync)
                     .AddHandler<ExecutionResult, RecoveryStrategy>(this.HandleExecutionFailureAsync);
 
-    /// <summary>
-    /// Handles recovery with telemetry instrumentation.
-    /// </summary>
     protected override async ValueTask ExecuteInstrumentedAsync(
         object message,
         IWorkflowContext context,
@@ -129,7 +103,6 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 
         await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
 
-        // Execute recovery action
         await ExecuteRecoveryAsync(strategy, context, cancellationToken);
 
         return strategy;
@@ -150,15 +123,11 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 
         await context.AddEventAsync(new RecoveryStrategyDeterminedEvent(strategy), cancellationToken);
 
-        // Execute recovery action
         await ExecuteRecoveryAsync(strategy, context, cancellationToken);
 
         return strategy;
     }
 
-    /// <summary>
-    /// Determines the appropriate recovery strategy using the LLM.
-    /// </summary>
     private async Task<RecoveryStrategy> DetermineRecoveryStrategyAsync(
         string nodeId,
         string errorMessage,
@@ -196,9 +165,6 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
         return strategy;
     }
 
-    /// <summary>
-    /// Executes the determined recovery strategy.
-    /// </summary>
     private async Task ExecuteRecoveryAsync(
         RecoveryStrategy strategy,
         IWorkflowContext context,
@@ -236,7 +202,6 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
         IWorkflowContext context,
         CancellationToken cancellationToken)
     {
-        // Increment retry counter
         var nodeId = ExtractNodeId(strategy);
         _retryCount[nodeId] = _retryCount.GetValueOrDefault(nodeId, 0) + 1;
 
@@ -255,7 +220,6 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
             new RecoveryActionEvent($"Retrying node {nodeId} (attempt {_retryCount[nodeId]}/{MaxRetries})"),
             cancellationToken);
 
-        // Signal retry - in a real implementation, this would trigger re-execution
         await context.YieldOutputAsync(
             $"Recovery: Retry attempt {_retryCount[nodeId]} for {nodeId}",
             cancellationToken);
@@ -314,14 +278,9 @@ public sealed class RecoveryHandlerAgent : InstrumentedAgent<object>
 
     private static string ExtractNodeId(RecoveryStrategy strategy)
     {
-        // Extract node ID from error type or root cause
-        // This is a simplified implementation
         return strategy.ErrorType;
     }
 
-    /// <summary>
-    /// Captures a state snapshot for potential rollback.
-    /// </summary>
     public void CaptureStateSnapshot(object state)
     {
         if (EnableStateSnapshots)

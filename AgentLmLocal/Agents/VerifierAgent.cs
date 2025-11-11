@@ -1,52 +1,29 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 using AgentLmLocal;
 using AgentLmLocal.Services;
 using AgentLmLocal.Workflow;
+using WorkflowRouteBuilder = Microsoft.Agents.AI.Workflows.RouteBuilder;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
-/// <summary>
-/// VerifierAgent: Acts as "LLM-as-a-judge" to evaluate workflow step outputs.
-///
-/// This agent gates workflow advancement by evaluating the quality and correctness
-/// of execution results. It uses selective verification and supports speculative
-/// execution with rollback capabilities when quality thresholds aren't met.
-///
-/// Based on the agentic workflows pattern described in the research paper.
-/// </summary>
 public sealed class VerifierAgent : InstrumentedAgent<object>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
     private readonly LlmService _llmService;
 
-    /// <summary>
-    /// Minimum quality score (1-10) required to pass verification.
-    /// </summary>
     public int MinimumQualityScore { get; init; } = 7;
 
-    /// <summary>
-    /// Whether to enable speculative execution (continue on minor issues).
-    /// </summary>
     public bool EnableSpeculativeExecution { get; init; } = true;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="VerifierAgent"/> class.
-    /// </summary>
-    /// <param name="id">A unique identifier for the verifier agent.</param>
-    /// <param name="agentFactory">Factory for creating AI agents.</param>
-    /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance.</param>
     public VerifierAgent(
         string id,
         AgentFactory agentFactory,
-        LlmService llmService,
-        ILogger<VerifierAgent> logger)
-        : base(id, logger)
+        LlmService llmService)
+        : base(id)
     {
         _llmService = llmService;
 
@@ -76,13 +53,10 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             ChatResponseFormat.ForJsonSchema<VerificationResult>());
     }
 
-    protected override RouteBuilder ConfigureRoutes(RouteBuilder routeBuilder) =>
+    protected override WorkflowRouteBuilder ConfigureRoutes(WorkflowRouteBuilder routeBuilder) =>
         routeBuilder.AddHandler<List<ExecutionResult>, VerificationResult>(this.VerifyMultipleAsync)
                     .AddHandler<ExecutionResult, VerificationResult>(this.VerifySingleAsync);
 
-    /// <summary>
-    /// Verifies execution results with telemetry instrumentation.
-    /// </summary>
     protected override async ValueTask ExecuteInstrumentedAsync(
         object message,
         IWorkflowContext context,
@@ -116,7 +90,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
 
             await context.AddEventAsync(new VerificationCompletedEvent(verification), cancellationToken);
 
-            // If critical failure detected, handle immediately
             if (!verification.Passed && verification.RequiresRollback)
             {
                 await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
@@ -124,7 +97,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             }
         }
 
-        // Find the lowest scoring result
         var lowestScore = verificationResults.MinBy(v => v.QualityScore);
         if (lowestScore != null && !lowestScore.Passed)
         {
@@ -132,7 +104,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
             return lowestScore; // Return the failed result
         }
 
-        // All passed - send success signal
         await context.YieldOutputAsync(
             $"Verification passed: {verificationResults.Count} results verified successfully.",
             cancellationToken);
@@ -157,7 +128,6 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
 
         if (!verification.Passed)
         {
-            // Send to recovery handler
             await context.SendMessageAsync(verification, cancellationToken: cancellationToken);
         }
         else
@@ -170,14 +140,10 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         return verification;
     }
 
-    /// <summary>
-    /// Performs the actual verification using the LLM.
-    /// </summary>
     private async Task<VerificationResult> PerformVerificationAsync(
         ExecutionResult result,
         CancellationToken cancellationToken)
     {
-        // Handle execution failures specially
         var status = EnumExtensions.ParseExecutionStatus(result.Status);
         if (status == ExecutionStatus.Failure)
         {
@@ -216,12 +182,10 @@ public sealed class VerifierAgent : InstrumentedAgent<object>
         var verification = await _llmService.InvokeStructuredAsync<VerificationResult>(
             _agent, _thread, prompt, cancellationToken);
 
-        // Apply business rules
         if (verification.QualityScore < MinimumQualityScore)
         {
             verification.Passed = false;
 
-            // Allow speculative execution for minor issues
             if (EnableSpeculativeExecution && verification.QualityScore >= MinimumQualityScore - 2)
             {
                 verification.Passed = true; // Allow to continue but flag for review

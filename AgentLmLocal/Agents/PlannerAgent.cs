@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.Logging;
 using WorkflowCustomAgentExecutorsSample.Models;
 using ChatResponseFormat = Microsoft.Extensions.AI.ChatResponseFormat;
 using AgentLmLocal;
@@ -9,34 +8,17 @@ using AgentLmLocal.Workflow;
 
 namespace WorkflowCustomAgentExecutorsSample.Agents;
 
-/// <summary>
-/// PlannerAgent: Decomposes complex tasks into multi-step DAGs (Directed Acyclic Graphs).
-///
-/// This agent analyzes incoming tasks and generates structured plans with typed nodes
-/// representing tool calls, LLM invocations, and conditional branches. It manages
-/// dependencies between steps and produces an execution order.
-///
-/// Based on the agentic workflows pattern described in the research paper.
-/// </summary>
 public sealed class PlannerAgent : InstrumentedAgent<string>
 {
     private readonly AIAgent _agent;
     private readonly AgentThread _thread;
     private readonly LlmService _llmService;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="PlannerAgent"/> class.
-    /// </summary>
-    /// <param name="id">A unique identifier for the planner agent.</param>
-    /// <param name="agentFactory">Factory for creating AI agents.</param>
-    /// <param name="llmService">Service for LLM invocations.</param>
-    /// <param name="logger">Logger instance.</param>
     public PlannerAgent(
         string id,
         AgentFactory agentFactory,
-        LlmService llmService,
-        ILogger<PlannerAgent> logger)
-        : base(id, logger)
+        LlmService llmService)
+        : base(id)
     {
         _llmService = llmService;
 
@@ -67,9 +49,6 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
             ChatResponseFormat.ForJsonSchema<WorkflowPlan>());
     }
 
-    /// <summary>
-    /// Handles incoming task requests and generates workflow plans.
-    /// </summary>
     protected override async ValueTask ExecuteInstrumentedAsync(string message, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var prompt = $"""
@@ -82,10 +61,8 @@ public sealed class PlannerAgent : InstrumentedAgent<string>
         var plan = await _llmService.InvokeStructuredAsync<WorkflowPlan>(
             _agent, _thread, prompt, cancellationToken);
 
-        // Emit event for monitoring
         await context.AddEventAsync(new PlanGeneratedEvent(plan), cancellationToken);
 
-        // Send the plan to the next executor
         await context.SendMessageAsync(plan, cancellationToken: cancellationToken);
     }
 }

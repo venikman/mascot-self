@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace WorkflowCustomAgentExecutorsSample.Models;
 
-/// <summary>
-/// Type of workflow node.
-/// </summary>
 public enum NodeType
 {
     ToolCall,
@@ -12,9 +9,6 @@ public enum NodeType
     Conditional
 }
 
-/// <summary>
-/// Status of an execution result.
-/// </summary>
 public enum ExecutionStatus
 {
     Success,
@@ -22,9 +16,6 @@ public enum ExecutionStatus
     Partial
 }
 
-/// <summary>
-/// Recovery action to take for failures.
-/// </summary>
 public enum RecoveryAction
 {
     Retry,
@@ -33,9 +24,6 @@ public enum RecoveryAction
     Escalate
 }
 
-/// <summary>
-/// Complexity level of a workflow.
-/// </summary>
 public enum ComplexityLevel
 {
     Low,
@@ -43,9 +31,6 @@ public enum ComplexityLevel
     High
 }
 
-/// <summary>
-/// Helper extensions for enum conversions.
-/// </summary>
 public static class EnumExtensions
 {
     public static string ToLowerString(this NodeType type) => type.ToString().ToLowerInvariant();
@@ -82,9 +67,6 @@ public static class EnumExtensions
         };
 }
 
-/// <summary>
-/// Represents a node in a workflow DAG (Directed Acyclic Graph).
-/// </summary>
 public sealed class WorkflowNode
 {
     [JsonPropertyName("id")]
@@ -106,9 +88,6 @@ public sealed class WorkflowNode
     public Dictionary<string, string> OutputSchema { get; set; } = [];
 }
 
-/// <summary>
-/// Represents a complete workflow plan with nodes and their relationships.
-/// </summary>
 public sealed class WorkflowPlan
 {
     [JsonPropertyName("task")]
@@ -124,9 +103,6 @@ public sealed class WorkflowPlan
     public string EstimatedComplexity { get; set; } = "medium";
 }
 
-/// <summary>
-/// Represents the result of executing a workflow step.
-/// </summary>
 public sealed class ExecutionResult
 {
     [JsonPropertyName("node_id")]
@@ -148,9 +124,6 @@ public sealed class ExecutionResult
     public Dictionary<string, object> Metadata { get; set; } = [];
 }
 
-/// <summary>
-/// Represents verification/validation feedback on an execution result.
-/// </summary>
 public sealed class VerificationResult
 {
     [JsonPropertyName("node_id")]
@@ -172,9 +145,6 @@ public sealed class VerificationResult
     public bool RequiresRollback { get; set; }
 }
 
-/// <summary>
-/// Represents a recovery strategy for handling failures.
-/// </summary>
 public sealed class RecoveryStrategy
 {
     [JsonPropertyName("error_type")]
