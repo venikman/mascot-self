@@ -9,14 +9,10 @@ import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 import type { OtelExporterConfig } from '../types';
 
-type SpanCountListener = (count: number) => void;
-
 class TelemetryService {
   private tracer: Tracer | null = null;
   private provider: WebTracerProvider | null = null;
-  private spanCount = 0;
   private isInitialized = false;
-  private listeners: Set<SpanCountListener> = new Set();
 
   initialize(config: OtelExporterConfig = { url: '/otel/traces' }): void {
     if (this.isInitialized) {
@@ -52,11 +48,12 @@ class TelemetryService {
     });
 
     // Add batch span processor with the exporter
+    // Increased limits to collect more data before flushing
     this.provider.addSpanProcessor(
       new BatchSpanProcessor(exporter, {
-        maxQueueSize: 100,
-        maxExportBatchSize: 10,
-        scheduledDelayMillis: 500,
+        maxQueueSize: 2048,        // Increased from 100
+        maxExportBatchSize: 512,   // Increased from 10
+        scheduledDelayMillis: 5000, // Increased from 500ms to 5s
       })
     );
 
@@ -91,33 +88,11 @@ class TelemetryService {
     return this.tracer;
   }
 
-  getSpanCount(): number {
-    return this.spanCount;
-  }
-
-  incrementSpanCount(): void {
-    this.spanCount++;
-    this.notifyListeners();
-  }
-
-  subscribeToSpanCount(listener: SpanCountListener): () => void {
-    this.listeners.add(listener);
-    // Return unsubscribe function
-    return () => {
-      this.listeners.delete(listener);
-    };
-  }
-
-  private notifyListeners(): void {
-    this.listeners.forEach((listener) => listener(this.spanCount));
-  }
-
   recordUserInput(inputLength: number): void {
     const span = this.getTracer().startSpan('user.input');
     span.setAttribute('input.length', inputLength);
     span.setAttribute('input.timestamp', Date.now());
     span.end();
-    this.incrementSpanCount();
   }
 
   startSpan(name: string, attributes?: Record<string, string | number | boolean>): Span {
@@ -141,28 +116,24 @@ class TelemetryService {
           (value) => {
             span.setStatus({ code: 1 }); // OK
             span.end();
-            this.incrementSpanCount();
             return value;
           },
           (error) => {
             span.setStatus({ code: 2, message: error.message }); // ERROR
             span.recordException(error);
             span.end();
-            this.incrementSpanCount();
             throw error;
           }
         ) as T;
       } else {
         span.setStatus({ code: 1 }); // OK
         span.end();
-        this.incrementSpanCount();
         return result;
       }
     } catch (error) {
       span.setStatus({ code: 2, message: (error as Error).message }); // ERROR
       span.recordException(error as Error);
       span.end();
-      this.incrementSpanCount();
       throw error;
     }
   }

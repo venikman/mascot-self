@@ -7,7 +7,7 @@ interface TelemetryStatusProps {
 export function TelemetryStatus({ status }: TelemetryStatusProps) {
   const statusClass = status.isActive ? 'active' : status.lastError ? 'error' : '';
   const statusText = status.isActive
-    ? 'OpenTelemetry Active'
+    ? 'OpenTelemetry Active (Auto-instrumented)'
     : status.lastError
       ? `Error: ${status.lastError}`
       : 'Initializing...';
@@ -17,11 +17,6 @@ export function TelemetryStatus({ status }: TelemetryStatusProps) {
       <div className="telemetry-status">
         <span className={`status-indicator ${statusClass}`}></span>
         <span>{statusText}</span>
-      </div>
-      <div className="telemetry-stats">
-        <span>
-          Spans sent: <strong>{status.spanCount}</strong>
-        </span>
       </div>
     </div>
   );

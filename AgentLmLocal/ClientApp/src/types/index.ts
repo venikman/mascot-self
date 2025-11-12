@@ -15,7 +15,6 @@ export interface ChatResponse {
 
 export interface TelemetryStatus {
   isActive: boolean;
-  spanCount: number;
   lastError?: string;
 }
 
