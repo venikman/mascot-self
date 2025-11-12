@@ -92,38 +92,33 @@ src/
 
 ## OpenTelemetry Integration
 
+This project uses **OpenTelemetry auto-instrumentation** for comprehensive, zero-maintenance telemetry.
+
 ### Automatic Instrumentation
 
 The app automatically instruments:
 
-- **Page Load**: Initial page load timing
-- **User Input**: Text input events
-- **API Calls**: HTTP requests to `/chat` endpoint
-- **UI Updates**: React component rendering
-- **Visibility Changes**: Tab focus/blur events
-- **Error Tracking**: Unhandled errors
+- **Document Load**: Page load timing and resource loading
+- **User Interactions**: Clicks, form submissions, and other DOM events
+- **Fetch API**: All HTTP requests made with `fetch()`
+- **XMLHttpRequest**: Legacy AJAX requests
+- **Errors**: Unhandled exceptions with stack traces
+- **Async Context**: Proper trace propagation through promises
 
-### Custom Spans
+All of this happens automatically with zero manual code!
 
-Use the `telemetryService` to create custom spans:
+### Custom Business Events
+
+Only one custom span is manually created for domain-specific logic:
 
 ```typescript
 import { telemetryService } from './services/telemetry';
 
-// Simple span
-const span = telemetryService.startSpan('my.operation', {
-  'custom.attribute': 'value',
-});
-// ... do work
-span.end();
-telemetryService.incrementSpanCount();
-
-// Span with automatic error handling
-const result = telemetryService.withSpan('my.operation', (span) => {
-  span.setAttribute('custom.attribute', 'value');
-  return doWork();
-});
+// Record user input event with metadata
+telemetryService.recordUserInput(messageLength);
 ```
+
+**Everything else is auto-instrumented** - no manual span creation needed!
 
 ### Using the Hook
 
@@ -131,15 +126,39 @@ const result = telemetryService.withSpan('my.operation', (span) => {
 import { useOpenTelemetry } from './hooks/useOpenTelemetry';
 
 function MyComponent() {
-  const { isActive, spanCount, lastError } = useOpenTelemetry();
+  const { isActive, lastExportTime, lastError } = useOpenTelemetry();
 
   return (
     <div>
-      Status: {isActive ? 'Active' : 'Inactive'}
-      Spans: {spanCount}
+      Status: {isActive ? 'Active (Auto-instrumented)' : 'Inactive'}
+      Last Export: {lastExportTime ? '2s ago' : 'No exports yet'}
     </div>
   );
 }
+```
+
+### Configuration
+
+For advanced configuration options, see **[TELEMETRY_CONFIG.md](./TELEMETRY_CONFIG.md)**
+
+Available configurations:
+- **Batch Settings**: Tune performance (queue size, batch size, delay)
+- **Instrumentations**: Enable/disable specific auto-instrumentations
+- **Resource Attributes**: Add custom metadata (tenant ID, region, etc.)
+- **HTTP Headers**: Add authentication or API keys
+
+Example:
+```typescript
+telemetryService.initialize({
+  url: '/otel/traces',
+  batchSettings: {
+    maxExportBatchSize: 100,
+    scheduledDelayMillis: 5000,
+  },
+  resourceAttributes: {
+    'tenant.id': getTenantId(),
+  }
+});
 ```
 
 ## API Integration
@@ -170,12 +189,21 @@ OpenTelemetry data is automatically sent to `POST /otel/traces` in OTLP/HTTP JSO
 
 ### Telemetry Configuration
 
-Edit `src/services/telemetry.ts` to customize:
+Initialize with configuration options at startup:
 
-- Service name and version
-- Resource attributes
-- Exporter URL
-- Batch processor settings
+```typescript
+telemetryService.initialize({
+  url: '/otel/traces',
+  // ... see TELEMETRY_CONFIG.md for all options
+});
+```
+
+See **[TELEMETRY_CONFIG.md](./TELEMETRY_CONFIG.md)** for complete documentation on:
+- Batch processor tuning
+- Selective instrumentation
+- Custom resource attributes
+- Production configurations
+- Performance optimization
 
 ### Dev Server Configuration
 
