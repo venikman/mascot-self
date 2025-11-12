@@ -186,6 +186,8 @@ class TelemetryService {
 
   shutdown(): Promise<void> {
     if (this.provider) {
+      // Reset initialization flag to support React StrictMode remounting
+      this.isInitialized = false;
       return this.provider.shutdown();
     }
     return Promise.resolve();

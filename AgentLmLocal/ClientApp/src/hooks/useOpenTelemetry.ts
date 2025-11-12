@@ -34,11 +34,14 @@ export function useOpenTelemetry() {
 
     // Track errors
     const handleError = (event: ErrorEvent) => {
-      telemetryService.recordError(event.error, {
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-      });
+      // Guard against null/undefined errors to prevent telemetry crashes
+      if (event.error) {
+        telemetryService.recordError(event.error, {
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+        });
+      }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);

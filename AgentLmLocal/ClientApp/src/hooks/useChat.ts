@@ -34,9 +34,9 @@ export function useChat() {
     setIsLoading(true);
     setError(null);
 
-    try {
-      const uiSpan = telemetryService.startSpan('chat.ui.update');
+    const uiSpan = telemetryService.startSpan('chat.ui.update');
 
+    try {
       const responseText = await chatApi.sendMessage(content);
 
       // Add assistant message
@@ -50,8 +50,7 @@ export function useChat() {
       setMessages((prev) => [...prev, assistantMessage]);
 
       uiSpan.setAttribute('chat.response.length', responseText.length);
-      uiSpan.end();
-      telemetryService.incrementSpanCount();
+      uiSpan.setAttribute('chat.success', true);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to get response';
       setError(errorMessage);
@@ -66,10 +65,16 @@ export function useChat() {
 
       setMessages((prev) => [...prev, errorMsg]);
 
+      uiSpan.setAttribute('chat.success', false);
+      uiSpan.setAttribute('chat.error', errorMessage);
+      uiSpan.setStatus({ code: 2, message: errorMessage });
+
       telemetryService.recordError(err as Error, {
         context: 'chat.sendMessage',
       });
     } finally {
+      uiSpan.end();
+      telemetryService.incrementSpanCount();
       setIsLoading(false);
     }
   }, []);

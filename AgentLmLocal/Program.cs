@@ -79,8 +79,9 @@ public static class Program
         var app = builder.Build();
 
         // Enable static files for frontend
-        app.UseStaticFiles();
+        // IMPORTANT: UseDefaultFiles MUST come before UseStaticFiles for SPA routing
         app.UseDefaultFiles();
+        app.UseStaticFiles();
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 
