@@ -16,6 +16,7 @@ export interface ChatResponse {
 export interface TelemetryStatus {
   isActive: boolean;
   lastError?: string;
+  lastExportTime?: Date | null;
 }
 
 export interface OtelExporterConfig {

@@ -3,16 +3,18 @@ import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { trace, context, Span, Tracer } from '@opentelemetry/api';
+import { trace, Tracer } from '@opentelemetry/api';
 import { ZoneContextManager } from '@opentelemetry/context-zone';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 import type { OtelExporterConfig } from '../types';
+import packageJson from '../../package.json';
 
 class TelemetryService {
   private tracer: Tracer | null = null;
   private provider: WebTracerProvider | null = null;
   private isInitialized = false;
+  private lastExportTime: Date | null = null;
 
   initialize(config: OtelExporterConfig = { url: '/otel/traces' }): void {
     if (this.isInitialized) {
@@ -26,7 +28,7 @@ class TelemetryService {
     const resource = Resource.default().merge(
       new Resource({
         [ATTR_SERVICE_NAME]: 'ai-chat-frontend',
-        [ATTR_SERVICE_VERSION]: '1.0.0',
+        [ATTR_SERVICE_VERSION]: packageJson.version,
         'deployment.environment': import.meta.env.MODE,
         'browser.user_agent': navigator.userAgent,
         'browser.language': navigator.language,
@@ -34,7 +36,7 @@ class TelemetryService {
     );
 
     // Create OTLP exporter pointing to our proxy endpoint
-    const exporter = new OTLPTraceExporter({
+    const baseExporter = new OTLPTraceExporter({
       url: config.url,
       headers: {
         'Content-Type': 'application/json',
@@ -42,18 +44,27 @@ class TelemetryService {
       },
     });
 
+    // Wrap exporter to track last export time
+    const exporter = {
+      export: (spans: any, resultCallback: any) => {
+        this.lastExportTime = new Date();
+        return baseExporter.export(spans, resultCallback);
+      },
+      shutdown: () => baseExporter.shutdown(),
+    };
+
     // Create tracer provider
     this.provider = new WebTracerProvider({
       resource: resource,
     });
 
     // Add batch span processor with the exporter
-    // Increased limits to collect more data before flushing
+    // Tuned for browser context: smaller batches, faster export to prevent data loss on tab close
     this.provider.addSpanProcessor(
       new BatchSpanProcessor(exporter, {
-        maxQueueSize: 2048,        // Increased from 100
-        maxExportBatchSize: 512,   // Increased from 10
-        scheduledDelayMillis: 5000, // Increased from 500ms to 5s
+        maxQueueSize: 256,         // Reasonable queue size for browser
+        maxExportBatchSize: 50,    // Efficient batch size without over-batching
+        scheduledDelayMillis: 2000, // 2s delay - safer for browsers (users close tabs quickly)
       })
     );
 
@@ -63,7 +74,7 @@ class TelemetryService {
     });
 
     // Get tracer instance
-    this.tracer = trace.getTracer('ai-chat-frontend', '1.0.0');
+    this.tracer = trace.getTracer('ai-chat-frontend', packageJson.version);
 
     // Register auto-instrumentations for automatic infrastructure tracing
     registerInstrumentations({
@@ -88,54 +99,15 @@ class TelemetryService {
     return this.tracer;
   }
 
+  getLastExportTime(): Date | null {
+    return this.lastExportTime;
+  }
+
   recordUserInput(inputLength: number): void {
     const span = this.getTracer().startSpan('user.input');
     span.setAttribute('input.length', inputLength);
     span.setAttribute('input.timestamp', Date.now());
     span.end();
-  }
-
-  startSpan(name: string, attributes?: Record<string, string | number | boolean>): Span {
-    const span = this.getTracer().startSpan(name);
-
-    if (attributes) {
-      Object.entries(attributes).forEach(([key, value]) => {
-        span.setAttribute(key, value);
-      });
-    }
-
-    return span;
-  }
-
-  withSpan<T>(name: string, fn: (span: Span) => T, attributes?: Record<string, string | number | boolean>): T {
-    const span = this.startSpan(name, attributes);
-    try {
-      const result = fn(span);
-      if (result instanceof Promise) {
-        return result.then(
-          (value) => {
-            span.setStatus({ code: 1 }); // OK
-            span.end();
-            return value;
-          },
-          (error) => {
-            span.setStatus({ code: 2, message: error.message }); // ERROR
-            span.recordException(error);
-            span.end();
-            throw error;
-          }
-        ) as T;
-      } else {
-        span.setStatus({ code: 1 }); // OK
-        span.end();
-        return result;
-      }
-    } catch (error) {
-      span.setStatus({ code: 2, message: (error as Error).message }); // ERROR
-      span.recordException(error as Error);
-      span.end();
-      throw error;
-    }
   }
 
   shutdown(): Promise<void> {

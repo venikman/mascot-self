@@ -108,7 +108,27 @@ public static class Program
                         var spanAttributes = span.Attributes
                             .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value));
 
-                        var durationNano = long.Parse(span.EndTimeUnixNano) - long.Parse(span.StartTimeUnixNano);
+                        // Safely parse timestamps to prevent crashes on malformed data
+                        if (!long.TryParse(span.StartTimeUnixNano, out var startNano) ||
+                            !long.TryParse(span.EndTimeUnixNano, out var endNano))
+                        {
+                            logger.LogWarning(
+                                "Invalid timestamp format for span {SpanName} (TraceId: {TraceId}). Skipping duration calculation.",
+                                span.Name,
+                                span.TraceId);
+
+                            // Log span without duration
+                            logger.LogInformation(
+                                "Frontend span: {SpanName} | TraceId: {TraceId} | SpanId: {SpanId} | Duration: N/A | Attributes: {Attributes} | Resource: {Resource}",
+                                span.Name,
+                                span.TraceId,
+                                span.SpanId,
+                                JsonSerializer.Serialize(spanAttributes),
+                                JsonSerializer.Serialize(resourceAttributes));
+                            continue;
+                        }
+
+                        var durationNano = endNano - startNano;
                         var durationMs = durationNano / 1_000_000.0;
 
                         logger.LogInformation(

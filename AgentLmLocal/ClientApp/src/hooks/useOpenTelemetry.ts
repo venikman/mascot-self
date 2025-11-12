@@ -11,7 +11,7 @@ export function useOpenTelemetry() {
     // Initialize OpenTelemetry
     try {
       telemetryService.initialize();
-      setStatus({ isActive: true });
+      setStatus({ isActive: true, lastExportTime: null });
     } catch (error) {
       console.error('Failed to initialize OpenTelemetry:', error);
       setStatus({
@@ -20,21 +20,18 @@ export function useOpenTelemetry() {
       });
     }
 
+    // Poll for last export time updates
+    const interval = setInterval(() => {
+      const lastExportTime = telemetryService.getLastExportTime();
+      setStatus((prev) => ({ ...prev, lastExportTime }));
+    }, 1000);
+
     // Cleanup
     return () => {
+      clearInterval(interval);
       telemetryService.shutdown();
     };
   }, []);
 
   return status;
-}
-
-export function useTelemetrySpan(spanName: string) {
-  useEffect(() => {
-    const span = telemetryService.startSpan(spanName);
-
-    return () => {
-      span.end();
-    };
-  }, [spanName]);
 }
