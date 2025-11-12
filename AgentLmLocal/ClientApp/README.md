@@ -1,21 +1,30 @@
 # AI Chat Frontend with OpenTelemetry
 
-React + TypeScript frontend application with OpenTelemetry integration.
+React + TypeScript frontend application with OpenTelemetry integration, built entirely with Bun.
 
 ## Tech Stack
 
 - **React 18** - UI framework
 - **TypeScript** - Type safety
-- **Vite** - Build tool
-- **Bun** - Package manager
+- **Bun** - Runtime, package manager, bundler, and dev server (all-in-one!)
 - **OpenTelemetry Web SDK** - Telemetry collection
 - **AI SDK UI Utils** - Vercel AI SDK utilities
+
+## Why Bun?
+
+This project uses **Bun for everything**:
+- ✅ **No Vite, No Webpack, No additional bundlers**
+- ✅ **Native TypeScript/TSX support** - runs directly without transpilation
+- ✅ **Built-in bundler** - faster than Webpack, Rollup, or Parcel
+- ✅ **Built-in dev server** - with proxy support
+- ✅ **3x faster** installs than npm
+- ✅ **All-in-one toolchain** - simpler setup
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) installed
+- [Bun](https://bun.sh/) v1.0.0 or higher
 - Backend server running on `http://localhost:5000`
 
 ### Installation
@@ -28,20 +37,29 @@ bun install
 ### Development
 
 ```bash
-# Start development server with hot reload
+# Start Bun dev server with hot reload
 bun run dev
 ```
 
-This will start the Vite dev server on `http://localhost:5173` with proxy configured to forward API calls to the backend.
+This starts Bun's HTTP server on `http://localhost:5173`:
+- ⚡ Instant TypeScript/TSX transpilation
+- 🔄 Proxies `/otel` and `/chat` to backend
+- 🔥 Hot reload on file changes
+- 📦 On-the-fly bundling
 
 ### Build for Production
 
 ```bash
-# Build and output to ../wwwroot
+# Build with Bun's native bundler
 bun run build
 ```
 
-The production build will be placed in `../wwwroot` so the .NET backend can serve it as static files.
+The production build:
+- Outputs to `../wwwroot` for .NET backend serving
+- Minifies and optimizes code
+- Generates source maps
+- Creates content-hashed filenames for caching
+- Uses code splitting for optimal loading
 
 ### Preview Production Build
 
@@ -159,9 +177,23 @@ Edit `src/services/telemetry.ts` to customize:
 - Exporter URL
 - Batch processor settings
 
-### API Base URL
+### Dev Server Configuration
 
-The Vite proxy is configured in `vite.config.ts`. For production, the app uses relative URLs.
+The dev server is configured in `server.ts`:
+- Port: 5173 (default)
+- Backend proxy: http://localhost:5000
+- Proxied paths: `/otel`, `/chat`
+
+For production, the app uses relative URLs.
+
+### Build Configuration
+
+The build process is configured in `build.ts`:
+- Entry point: `src/main.tsx`
+- Output directory: `../wwwroot`
+- Minification: enabled
+- Source maps: external
+- Code splitting: enabled
 
 ## Development Tips
 
@@ -171,7 +203,7 @@ All components and services use TypeScript for type safety. Types are defined in
 
 ### Hot Reload
 
-Vite provides instant hot module replacement (HMR) during development. Changes to components update immediately without full page reload.
+Bun's dev server automatically transpiles TypeScript/TSX on-the-fly. Simply refresh the browser to see changes (or use browser auto-refresh extensions).
 
 ### Debugging
 
@@ -179,15 +211,18 @@ Vite provides instant hot module replacement (HMR) during development. Changes t
 2. Check Console for OpenTelemetry initialization logs
 3. Check Network tab for `/otel/traces` requests
 4. Use React DevTools for component inspection
+5. Source maps are available for debugging
 
 ## Building for Production
 
 When building for production:
 
 1. Run `bun run build`
-2. Files are output to `../wwwroot`
-3. .NET backend serves these files at the root URL
-4. All API calls use relative URLs
+2. Bun's bundler optimizes and minifies code
+3. Files are output to `../wwwroot`
+4. .NET backend serves these files at the root URL
+5. All API calls use relative URLs
+6. Content-hashed filenames for optimal caching
 
 ## Troubleshooting
 

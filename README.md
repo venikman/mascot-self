@@ -102,27 +102,28 @@ The project includes a **frontend OpenTelemetry example** that demonstrates how 
 
 #### React + TypeScript Version (Recommended)
 
-Modern React application with TypeScript, Bun, and Vite:
+Modern React application built entirely with Bun - no Vite, no Webpack!
 
 **Features:**
 - React 18 with TypeScript for type safety
 - OpenTelemetry Web SDK with proper npm packages
 - Custom React hooks for telemetry management
 - Component-based architecture
-- Bun for fast package management
-- Vite for instant hot reload and optimized builds
+- **Bun for everything**: package manager, bundler, dev server, and runtime
+- Native TypeScript/TSX support with instant transpilation
+- 3x faster than npm/webpack
 
 **Development:**
 ```bash
 cd AgentLmLocal/ClientApp
 bun install
-bun run dev  # Starts on http://localhost:5173
+bun run dev  # Bun dev server on http://localhost:5173
 ```
 
 **Production Build:**
 ```bash
 cd AgentLmLocal/ClientApp
-bun run build  # Outputs to ../wwwroot
+bun run build  # Bun's native bundler outputs to ../wwwroot
 ```
 
 See [AgentLmLocal/ClientApp/README.md](AgentLmLocal/ClientApp/README.md) for details.
