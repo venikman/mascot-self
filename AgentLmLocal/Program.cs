@@ -1,6 +1,7 @@
 using Azure.AI.OpenAI;
 using AgentLmLocal.Configuration;
 using AgentLmLocal.Services;
+using AgentLmLocal.Models;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using System.ClientModel;
 using System;
+using System.Text.Json;
 using OpenTelemetry;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -76,7 +78,79 @@ public static class Program
 
         var app = builder.Build();
 
+        // Enable static files for frontend
+        app.UseStaticFiles();
+        app.UseDefaultFiles();
+
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+
+        // OTEL proxy endpoint - receives telemetry from frontend
+        app.MapPost("/otel/traces", (ILoggerFactory loggerFactory, OtelTraceRequest? traceRequest) =>
+        {
+            if (traceRequest is null)
+            {
+                return Results.BadRequest(new { error = "Invalid trace data" });
+            }
+
+            var logger = loggerFactory.CreateLogger("OtelProxy");
+
+            // Log each span in JSONL format
+            foreach (var resourceSpan in traceRequest.ResourceSpans)
+            {
+                var resourceAttributes = resourceSpan.Resource?.Attributes
+                    .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value)) ?? new Dictionary<string, object?>();
+
+                foreach (var scopeSpan in resourceSpan.ScopeSpans)
+                {
+                    foreach (var span in scopeSpan.Spans)
+                    {
+                        var spanAttributes = span.Attributes
+                            .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value));
+
+                        var durationNano = long.Parse(span.EndTimeUnixNano) - long.Parse(span.StartTimeUnixNano);
+                        var durationMs = durationNano / 1_000_000.0;
+
+                        logger.LogInformation(
+                            "Frontend span: {SpanName} | TraceId: {TraceId} | SpanId: {SpanId} | Duration: {DurationMs}ms | Attributes: {Attributes} | Resource: {Resource}",
+                            span.Name,
+                            span.TraceId,
+                            span.SpanId,
+                            durationMs,
+                            JsonSerializer.Serialize(spanAttributes),
+                            JsonSerializer.Serialize(resourceAttributes));
+                    }
+                }
+            }
+
+            return Results.Ok(new { status = "ok" });
+        });
+
+        // Simple chat endpoint for AI chat
+        app.MapPost("/chat", async (IChatClient chatClient, ILoggerFactory loggerFactory, ChatRequest? request) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Message))
+            {
+                return Results.BadRequest(new { error = "Message is required" });
+            }
+
+            var logger = loggerFactory.CreateLogger("ChatEndpoint");
+            logger.LogInformation("Chat request received: {Message}", request.Message);
+
+            try
+            {
+                var response = await chatClient.CompleteAsync(request.Message);
+                var responseText = response.Message.Text ?? "No response";
+
+                logger.LogInformation("Chat response generated: {Response}", responseText);
+
+                return Results.Ok(new { message = responseText });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error generating chat response");
+                return Results.Problem("Error generating response");
+            }
+        });
 
         app.MapPost("/run", (AgenticWorkflowExample example, RunTracker tracker, ILoggerFactory loggerFactory, RunRequest? request) =>
         {
@@ -175,5 +249,15 @@ public static class Program
         return Enum.TryParse(normalized, ignoreCase: false, out version);
     }
 
+    private static object? GetAttributeValue(AttributeValue value)
+    {
+        if (value.StringValue is not null) return value.StringValue;
+        if (value.IntValue.HasValue) return value.IntValue.Value;
+        if (value.DoubleValue.HasValue) return value.DoubleValue.Value;
+        if (value.BoolValue.HasValue) return value.BoolValue.Value;
+        return null;
+    }
+
     private sealed record RunRequest(string Task);
+    private sealed record ChatRequest(string Message);
 }

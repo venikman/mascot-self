@@ -60,7 +60,8 @@ If you're routing through a proxy, point `AZURE_OPENAI_ENDPOINT` at the proxy UR
 
 3. **Access the endpoints**:
    - Health check: `http://localhost:5000/health`
-  - Trigger workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Plan a 3 course meal"}'`
+   - AI Chat UI: `http://localhost:5000` (Frontend OpenTelemetry example)
+   - Trigger workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Plan a 3 course meal"}'`
    - Check workflow status: `curl http://localhost:5000/runs/{workflowId}`
 
 The POST response includes a `workflowId` and a `Location` header. Use those values with the `/runs/{workflowId}` endpoint to poll status (events, outputs, and errors) instead of tailing the console. Every log line and status update is tagged with the workflow ID for easier correlation.
@@ -69,12 +70,14 @@ The POST response includes a `workflowId` and a `Location` header. Use those val
 
 - `AgentLmLocal/` - Main application
   - `Agents/` - Agent implementations (Planner, Executor, Verifier, Recovery)
-  - `Models/` - Data models and schemas
+  - `Models/` - Data models and schemas (including OTLP models)
   - `Services/` - Shared services (LLM service, Agent factory)
   - `Workflow/` - Workflow event handling
   - `Configuration/` - Application configuration
+  - `wwwroot/` - Frontend application (AI chat with OpenTelemetry)
 - `docs/` - Documentation
   - `SERILOG-OTEL-HYBRID.md` - Logging architecture documentation
+  - `FRONTEND-OTEL-EXAMPLE.md` - Frontend OpenTelemetry integration guide
 
 ## Observability
 
@@ -92,6 +95,28 @@ All logs are output in [Compact JSON format](https://github.com/serilog/serilog-
 ```
 
 For complete details, see [docs/SERILOG-OTEL-HYBRID.md](docs/SERILOG-OTEL-HYBRID.md).
+
+### Frontend OpenTelemetry Integration
+
+The project includes a **frontend OpenTelemetry example** that demonstrates how to collect and export telemetry from browser-based applications.
+
+**Features:**
+- Simple AI chat interface with real-time telemetry visualization
+- OpenTelemetry Web SDK integration via CDN
+- Automatic instrumentation of user interactions and API calls
+- Backend proxy endpoint that receives OTLP data and logs it in JSONL format
+- End-to-end tracing from frontend to backend
+
+**Access the demo:**
+Navigate to `http://localhost:5000` after starting the application to see the AI chat interface with live telemetry tracking.
+
+**Key components:**
+- `POST /otel/traces` - Proxy endpoint that receives telemetry from frontend
+- `POST /chat` - AI chat endpoint for the demo
+- `wwwroot/app.js` - OpenTelemetry instrumentation and trace collection
+- `Models/OtelModels.cs` - OTLP (OpenTelemetry Protocol) data models
+
+For detailed documentation, see [docs/FRONTEND-OTEL-EXAMPLE.md](docs/FRONTEND-OTEL-EXAMPLE.md).
 
 ## How It Works
 
