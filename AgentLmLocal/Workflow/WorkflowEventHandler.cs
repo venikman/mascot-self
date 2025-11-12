@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using WorkflowCustomAgentExecutorsSample.Models;
 using AgentLmLocal.Services;
+using Microsoft.Extensions.Logging;
 
 namespace AgentLmLocal.Workflow;
 
@@ -8,13 +9,15 @@ public sealed class WorkflowEventHandler
 {
     private readonly string _workflowId;
     private readonly RunTracker _runTracker;
+    private readonly ILogger _logger;
     private readonly Dictionary<string, int> _eventCounts;
     private readonly List<string> _outputs = new();
 
-    public WorkflowEventHandler(string workflowId, RunTracker runTracker)
+    public WorkflowEventHandler(string workflowId, RunTracker runTracker, ILoggerFactory loggerFactory)
     {
         _workflowId = workflowId;
         _runTracker = runTracker;
+        _logger = loggerFactory.CreateLogger<WorkflowEventHandler>();
 
         _eventCounts = new Dictionary<string, int>
         {
@@ -60,7 +63,7 @@ public sealed class WorkflowEventHandler
                 break;
 
             default:
-                Console.WriteLine($"[Workflow {_workflowId}][{eventType}] {evt}");
+                _logger.LogInformation("Workflow {WorkflowId} event {EventType}: {Event}", _workflowId, eventType, evt);
                 break;
         }
 
@@ -72,33 +75,33 @@ public sealed class WorkflowEventHandler
 
     private void HandlePlanGenerated(PlanGeneratedEvent evt)
     {
-        Console.WriteLine($"[Workflow {_workflowId}][{nameof(PlanGeneratedEvent)}] {evt}");
+        _logger.LogInformation("Workflow {WorkflowId} {EventType}: {Event}", _workflowId, nameof(PlanGeneratedEvent), evt);
     }
 
     private void HandleNodeExecuted(NodeExecutedEvent evt)
     {
-        Console.WriteLine($"[Workflow {_workflowId}][{nameof(NodeExecutedEvent)}] {evt}");
+        _logger.LogInformation("Workflow {WorkflowId} {EventType}: {Event}", _workflowId, nameof(NodeExecutedEvent), evt);
     }
 
     private void HandleVerificationCompleted(VerificationCompletedEvent evt)
     {
-        Console.WriteLine($"[Workflow {_workflowId}][{nameof(VerificationCompletedEvent)}] {evt}");
+        _logger.LogInformation("Workflow {WorkflowId} {EventType}: {Event}", _workflowId, nameof(VerificationCompletedEvent), evt);
     }
 
     private void HandleRecoveryStrategyDetermined(RecoveryStrategyDeterminedEvent evt)
     {
-        Console.WriteLine($"[Workflow {_workflowId}][{nameof(RecoveryStrategyDeterminedEvent)}] {evt}");
+        _logger.LogInformation("Workflow {WorkflowId} {EventType}: {Event}", _workflowId, nameof(RecoveryStrategyDeterminedEvent), evt);
     }
 
     private void HandleRecoveryAction(RecoveryActionEvent evt)
     {
-        Console.WriteLine($"[Workflow {_workflowId}][{nameof(RecoveryActionEvent)}] {evt}");
+        _logger.LogInformation("Workflow {WorkflowId} {EventType}: {Event}", _workflowId, nameof(RecoveryActionEvent), evt);
     }
 
     private void HandleWorkflowOutput(WorkflowOutputEvent evt)
     {
         var message = evt.ToString();
-        Console.WriteLine($"\n[Workflow {_workflowId}] >>> OUTPUT: {message}\n");
+        _logger.LogInformation("Workflow {WorkflowId} OUTPUT: {Output}", _workflowId, message);
         if (!string.IsNullOrWhiteSpace(message))
         {
             _outputs.Add(message);

@@ -16,19 +16,22 @@ public class AgenticWorkflowExample
     private readonly LlmService _llmService;
     private readonly RunTracker _runTracker;
     private readonly ILogger<AgenticWorkflowExample> _logger;
+    private readonly ILoggerFactory _loggerFactory;
 
     public AgenticWorkflowExample(
         AgentConfiguration config,
         AgentFactory agentFactory,
         LlmService llmService,
         RunTracker runTracker,
-        ILogger<AgenticWorkflowExample> logger)
+        ILogger<AgenticWorkflowExample> logger,
+        ILoggerFactory loggerFactory)
     {
         _config = config;
         _agentFactory = agentFactory;
         _llmService = llmService;
         _runTracker = runTracker;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     public async Task RunWorkflowAsync(string workflowId, string task, CancellationToken cancellationToken = default)
@@ -69,10 +72,9 @@ public class AgenticWorkflowExample
 
     private async Task RunWorkflowExample(string workflowId, Workflow workflow, string task, CancellationToken cancellationToken)
     {
-        Console.WriteLine("Workflow {0} starting. Task: {1}", workflowId, task);
-        _logger.LogInformation("Workflow {WorkflowId} executing task \"{Task}\"", workflowId, task);
+        _logger.LogInformation("Workflow {WorkflowId} starting. Task: {Task}", workflowId, task);
 
-        var eventHandler = new WorkflowEventHandler(workflowId, _runTracker);
+        var eventHandler = new WorkflowEventHandler(workflowId, _runTracker, _loggerFactory);
 
         try
         {
@@ -88,13 +90,11 @@ public class AgenticWorkflowExample
 
             var summary = string.Join(", ", eventCounts.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
 
-            Console.WriteLine("Workflow {0} completed successfully. Events: {1}", workflowId, summary);
-            _logger.LogInformation("Workflow {WorkflowId} finished. {Summary}", workflowId, summary);
+            _logger.LogInformation("Workflow {WorkflowId} completed successfully. Events: {Summary}", workflowId, summary);
         }
         catch (Exception ex)
         {
             _runTracker.MarkFailed(workflowId, ex);
-            Console.WriteLine("Workflow {0} failed: {1}", workflowId, ex.Message);
             _logger.LogError(ex, "Workflow {WorkflowId} failed", workflowId);
         }
     }
