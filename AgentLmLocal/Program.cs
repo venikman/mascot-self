@@ -96,17 +96,18 @@ public static class Program
             var logger = loggerFactory.CreateLogger("OtelProxy");
 
             // Log each span in JSONL format
-            foreach (var resourceSpan in traceRequest.ResourceSpans)
+            // Add null checks to prevent NullReferenceException on malformed OTLP payloads
+            foreach (var resourceSpan in traceRequest.ResourceSpans ?? Enumerable.Empty<ResourceSpans>())
             {
                 var resourceAttributes = resourceSpan.Resource?.Attributes
-                    .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value)) ?? new Dictionary<string, object?>();
+                    ?.ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value)) ?? new Dictionary<string, object?>();
 
-                foreach (var scopeSpan in resourceSpan.ScopeSpans)
+                foreach (var scopeSpan in resourceSpan.ScopeSpans ?? Enumerable.Empty<ScopeSpans>())
                 {
-                    foreach (var span in scopeSpan.Spans)
+                    foreach (var span in scopeSpan.Spans ?? Enumerable.Empty<Span>())
                     {
                         var spanAttributes = span.Attributes
-                            .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value));
+                            ?.ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value)) ?? new Dictionary<string, object?>();
 
                         // Safely parse timestamps to prevent crashes on malformed data
                         if (!long.TryParse(span.StartTimeUnixNano, out var startNano) ||

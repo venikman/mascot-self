@@ -27,7 +27,9 @@ class TelemetryService {
     // Merge configuration with defaults
     const serviceName = config.resourceAttributes?.serviceName ?? 'ai-chat-frontend';
     const serviceVersion = config.resourceAttributes?.serviceVersion ?? packageJson.version;
-    const environment = config.resourceAttributes?.environment ?? import.meta.env.MODE;
+    // Use process.env.NODE_ENV for Bun compatibility (import.meta.env not available in bundles)
+    const environment = config.resourceAttributes?.environment ??
+      (typeof process !== 'undefined' && process.env?.NODE_ENV) ?? 'development';
 
     // Create resource with service metadata
     const resourceAttrs: Record<string, string> = {

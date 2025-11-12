@@ -21,10 +21,20 @@ export function TelemetryStatus({ status }: TelemetryStatusProps) {
     return `${minutes}m ago`;
   };
 
+  const getStatusAriaLabel = () => {
+    if (status.isActive) return 'Telemetry is active and collecting data';
+    if (status.lastError) return `Telemetry error: ${status.lastError}`;
+    return 'Telemetry is initializing';
+  };
+
   return (
-    <div className="telemetry-info">
+    <div className="telemetry-info" role="status" aria-live="polite">
       <div className="telemetry-status">
-        <span className={`status-indicator ${statusClass}`}></span>
+        <span
+          className={`status-indicator ${statusClass}`}
+          aria-label={getStatusAriaLabel()}
+          role="img"
+        ></span>
         <span>{statusText}</span>
       </div>
       {status.isActive && (
