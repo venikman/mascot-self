@@ -1,4 +1,3 @@
-using Azure.AI.OpenAI;
 using AgentLmLocal.Configuration;
 using AgentLmLocal.Services;
 using AgentLmLocal.Models;
@@ -11,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using System.ClientModel;
+using System.Net.Http;
 using System;
 using System.Text.Json;
 using OpenTelemetry;
@@ -69,7 +69,20 @@ public static class Program
         var config = AgentConfiguration.FromEnvironment();
         builder.Services.AddSingleton(config);
 
-        builder.Services.AddSingleton<IChatClient>(_ => CreateChatClient(config));
+        builder.Services.AddHttpClient("openai", client =>
+        {
+            client.BaseAddress = new Uri(config.OpenAIBaseUrl);
+            if (!string.IsNullOrWhiteSpace(config.OpenAIApiKey))
+            {
+                client.DefaultRequestHeaders.Add("api_key", config.OpenAIApiKey);
+            }
+            if (!string.IsNullOrWhiteSpace(config.OpenAIVersion))
+            {
+                client.DefaultRequestHeaders.Add("version", config.OpenAIVersion);
+            }
+        });
+
+        builder.Services.AddSingleton<IChatClient>(sp => CreateOpenAIChatClient(config, sp.GetRequiredService<IHttpClientFactory>()));
 
         builder.Services.AddSingleton<AgentFactory>();
         builder.Services.AddSingleton<LlmService>();
@@ -148,7 +161,7 @@ public static class Program
         });
 
         // Simple chat endpoint for AI chat
-        app.MapPost("/chat", async (IChatClient chatClient, ILoggerFactory loggerFactory, ChatRequest? request) =>
+        app.MapPost("/chat", async (AgentFactory agentFactory, LlmService llmService, ILoggerFactory loggerFactory, ChatRequest? request) =>
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Message))
             {
@@ -160,12 +173,12 @@ public static class Program
 
             try
             {
-                var response = await chatClient.CompleteAsync(request.Message);
-                var responseText = response.Message.Text ?? "No response";
+                var (agent, thread) = agentFactory.CreateAgent("You are a helpful assistant.");
+                var responseText = await llmService.InvokeAsync(agent, thread, request.Message);
 
-                logger.LogInformation("Chat response generated: {Response}", responseText);
+                logger.LogInformation("Chat response generated: {Response}", responseText ?? "No response");
 
-                return Results.Ok(new { message = responseText });
+                return Results.Ok(new { message = responseText ?? "No response" });
             }
             catch (Exception ex)
             {
@@ -202,73 +215,20 @@ public static class Program
         return app.RunAsync();
     }
 
-    private static IChatClient CreateChatClient(AgentConfiguration config) =>
-        config.Provider switch
+    private static IChatClient CreateOpenAIChatClient(AgentConfiguration config, IHttpClientFactory httpClientFactory)
+    {
+        var httpClient = httpClientFactory.CreateClient("openai");
+
+        var options = new OpenAI.OpenAIClientOptions
         {
-            LlmProvider.AzureOpenAI => CreateAzureOpenAIChatClient(config),
-            _ => CreateLmStudioChatClient(config)
+            Endpoint = new Uri(config.OpenAIBaseUrl)
         };
 
-    private static IChatClient CreateLmStudioChatClient(AgentConfiguration config)
-    {
-        var lmStudioClient = new OpenAI.OpenAIClient(
-            new ApiKeyCredential(config.ApiKey),
-            new OpenAI.OpenAIClientOptions
-            {
-                Endpoint = new Uri(config.LmStudioEndpoint)
-            });
+        var client = new OpenAI.OpenAIClient(
+            new ApiKeyCredential(config.OpenAIApiKey),
+            options);
 
-        return lmStudioClient.GetChatClient(config.ModelId).AsIChatClient();
-    }
-
-    private static IChatClient CreateAzureOpenAIChatClient(AgentConfiguration config)
-    {
-        if (string.IsNullOrWhiteSpace(config.AzureOpenAIEndpoint) ||
-            string.IsNullOrWhiteSpace(config.AzureOpenAIApiKey) ||
-            string.IsNullOrWhiteSpace(config.AzureOpenAIDeployment))
-        {
-            throw new InvalidOperationException(
-                "Azure OpenAI provider selected, but AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT are not fully configured.");
-        }
-
-        var azureClient = new AzureOpenAIClient(
-            new Uri(config.AzureOpenAIEndpoint),
-            new ApiKeyCredential(config.AzureOpenAIApiKey),
-            CreateAzureOpenAIOptions(config.AzureOpenAIApiVersion));
-
-        return azureClient.GetChatClient(config.AzureOpenAIDeployment).AsIChatClient();
-    }
-
-    private static AzureOpenAIClientOptions CreateAzureOpenAIOptions(string apiVersion)
-    {
-        if (string.IsNullOrWhiteSpace(apiVersion))
-        {
-            return new AzureOpenAIClientOptions();
-        }
-
-        if (TryParseServiceVersion(apiVersion, out var version))
-        {
-            return new AzureOpenAIClientOptions(version);
-        }
-
-        return new AzureOpenAIClientOptions();
-    }
-
-    private static bool TryParseServiceVersion(
-        string apiVersion,
-        out AzureOpenAIClientOptions.ServiceVersion version)
-    {
-        if (Enum.TryParse(apiVersion, ignoreCase: true, out version))
-        {
-            return true;
-        }
-
-        var normalized = "V" + apiVersion
-            .Replace("-", "_", StringComparison.Ordinal)
-            .Replace(".", "_", StringComparison.Ordinal)
-            .Replace("preview", "Preview", StringComparison.OrdinalIgnoreCase);
-
-        return Enum.TryParse(normalized, ignoreCase: false, out version);
+        return client.GetChatClient(config.OpenAIModelId).AsIChatClient();
     }
 
     private static object? GetAttributeValue(AttributeValue value)

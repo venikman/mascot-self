@@ -1,140 +1,40 @@
-# Multi-Agent Workflow System
-
-A multi-agent system demonstrating coordinated planning, execution, verification, and recovery using .NET and AI workflows.
-
-## Overview
-
-This system showcases how multiple AI agents work together through a workflow pattern:
-
-1. **PlannerAgent**: Decomposes complex tasks into multi-step DAGs (Directed Acyclic Graphs)
-2. **ExecutorAgent**: Implements planned steps by invoking tools and APIs
-3. **VerifierAgent**: Evaluates execution quality using LLM-as-a-judge pattern
-4. **RecoveryHandlerAgent**: Manages exceptions and implements recovery strategies
+# Testing Guide
 
 ## Prerequisites
-
 - .NET 10.0 SDK
-- LM Studio (or compatible OpenAI API endpoint) running locally or remotely
-- A language model that supports structured JSON outputs
+- OpenAI-compatible endpoint (local or remote)
 
-## Configuration
-
-This application supports **two LLM providers**. See **[CONFIGURATION.md](CONFIGURATION.md)** for complete setup guide.
-
-### Quick Start
-
-**For LM Studio (Local):**
+## Environment Setup
 ```bash
-cp .env.lmstudio.example .env
+cp .env.example .env
+# Set OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+# Defaults: OPENAI_BASE_URL=http://127.0.0.1:1234/v1, OPENAI_MODEL=kat-dev-mlx
+```
+
+## Build & Run
+```bash
+cd AgentLmLocal
+dotnet build
 dotnet run
 ```
 
-**For Azure OpenAI (Cloud):**
-```bash
-cp .env.azureopenai.example .env
-# Edit .env with your Azure credentials
-dotnet run
-```
+## API Tests
+- Health: `curl http://localhost:5000/health`
+- Chat: `curl -X POST http://localhost:5000/chat -H "Content-Type: application/json" -d '{"message":"Hello"}'`
+- Start workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Create a mascot slogan"}'`
+- Check status: `curl http://localhost:5000/runs/{workflowId}`
 
-### Key Configuration
-
-**Switch providers** by changing one variable:
-- `LLM_PROVIDER=LmStudio` - Use local LM Studio or OpenAI-compatible endpoints
-- `LLM_PROVIDER=AzureOpenAI` - Use Azure OpenAI Service
-
-**LM Studio variables:**
-- `LMSTUDIO_ENDPOINT` - API endpoint (default: `http://localhost:1234/v1`)
-- `LMSTUDIO_API_KEY` - Authentication key (default: `lm-studio`)
-- `LMSTUDIO_MODEL` - Model identifier (default: `openai/gpt-oss-20b`)
-
-**Azure OpenAI variables:**
-- `AZURE_OPENAI_ENDPOINT` - Azure resource URL (e.g., `https://your-name.openai.azure.com/`)
-- `AZURE_OPENAI_API_KEY` - Azure API key
-- `AZURE_OPENAI_DEPLOYMENT` - Deployment name (e.g., `gpt-4o`)
-- `AZURE_OPENAI_API_VERSION` - API version (optional, defaults to latest)
-
-**Workflow tuning:**
-- `MINIMUM_RATING` - Quality threshold 1-10 (default: 7)
-- `MAX_ATTEMPTS` - Maximum retry attempts (default: 3)
-
-📚 **For detailed configuration, examples, and troubleshooting, see [CONFIGURATION.md](CONFIGURATION.md)**
-
-## Running the Application
-
-1. **Build the application**:
-   ```bash
-   cd AgentLmLocal
-   dotnet build
-   ```
-
-2. **Run the application**:
-   ```bash
-   dotnet run
-   ```
-
-3. **Access the endpoints**:
-   - Health check: `http://localhost:5000/health`
-   - AI Chat UI: `http://localhost:5000` (Frontend OpenTelemetry example)
-   - Trigger workflow: `curl -X POST http://localhost:5000/run -H "Content-Type: application/json" -d '{"task":"Plan a 3 course meal"}'`
-   - Check workflow status: `curl http://localhost:5000/runs/{workflowId}`
-
-The POST response includes a `workflowId` and a `Location` header. Use those values with the `/runs/{workflowId}` endpoint to poll status (events, outputs, and errors) instead of tailing the console. Every log line and status update is tagged with the workflow ID for easier correlation.
-
-## Project Structure
-
-- `AgentLmLocal/` - Main application
-  - `Agents/` - Agent implementations (Planner, Executor, Verifier, Recovery)
-  - `Models/` - Data models and schemas (including OTLP models)
-  - `Services/` - Shared services (LLM service, Agent factory)
-  - `Workflow/` - Workflow event handling
-  - `Configuration/` - Application configuration
-  - `wwwroot/` - Frontend application (AI chat with OpenTelemetry)
-- `docs/` - Documentation
-  - `SERILOG-OTEL-HYBRID.md` - Logging architecture documentation
-  - `FRONTEND-OTEL-EXAMPLE.md` - Frontend OpenTelemetry integration guide
-
-## Observability
-
-This application uses a **hybrid observability approach**:
-
-- **Serilog** for structured logging (JSON Lines to stdout)
-- **OpenTelemetry** for distributed tracing
-- **Automatic correlation** via TraceId/SpanId in logs
-
-All logs are output in [Compact JSON format](https://github.com/serilog/serilog-formatting-compact) (one JSON object per line), making them ideal for log aggregation systems like Splunk, Elasticsearch, or CloudWatch.
-
-**Example log output:**
-```json
-{"@t":"2025-11-11T14:30:45.123Z","@mt":"Workflow {WorkflowId} executing","@l":"Information","WorkflowId":"abc123","ServiceName":"AgentLmLocal","TraceId":"4bf92f3577b34da6","SpanId":"00f067aa0ba902b7"}
-```
-
-For complete details, see [docs/SERILOG-OTEL-HYBRID.md](docs/SERILOG-OTEL-HYBRID.md).
-
-### Frontend OpenTelemetry Integration
-
-The project includes a **React + TypeScript frontend** that demonstrates how to collect and export telemetry from browser-based applications.
-
-**Tech Stack:**
-- React 18 with TypeScript for type safety
-- OpenTelemetry Web SDK with proper npm packages
-- Custom React hooks for telemetry management
-- Component-based architecture
-- **Bun for everything**: package manager, bundler, dev server, and runtime
-- Native TypeScript/TSX support with instant transpilation
-- 3x faster than npm/webpack
-
-**Development:**
+## Frontend Tests
 ```bash
 cd AgentLmLocal/ClientApp
 bun install
-bun run dev  # Bun dev server on http://localhost:5173
+bun run dev   # http://localhost:5173
 ```
+Interact with the chat UI; requests proxy to the backend `/chat`.
 
-**Production Build:**
-```bash
-cd AgentLmLocal/ClientApp
-bun run build  # Bun's native bundler outputs to ../wwwroot
-```
+## Observability Checks
+- Console outputs JSON logs (Serilog)
+- Frontend telemetry posts to `/otel/traces`
 
 **Backend Endpoints:**
 - `POST /otel/traces` - Proxy endpoint that receives telemetry from frontend
