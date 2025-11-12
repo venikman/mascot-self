@@ -13,7 +13,7 @@ This system showcases how multiple AI agents work together through a workflow pa
 
 ## Prerequisites
 
-- .NET 9.0 SDK
+- .NET 10.0 SDK
 - LM Studio (or compatible OpenAI API endpoint) running locally or remotely
 - A language model that supports structured JSON outputs
 
