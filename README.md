@@ -19,31 +19,45 @@ This system showcases how multiple AI agents work together through a workflow pa
 
 ## Configuration
 
-### Provider selection
+This application supports **two LLM providers**. See **[CONFIGURATION.md](CONFIGURATION.md)** for complete setup guide.
 
-- `LLM_PROVIDER`: `LmStudio` (default) or `AzureOpenAI`. This controls which chat client is registered.
+### Quick Start
 
-### LM Studio / local OpenAI-compatible endpoints
+**For LM Studio (Local):**
+```bash
+cp .env.lmstudio.example .env
+dotnet run
+```
 
-- `LMSTUDIO_ENDPOINT`: API endpoint (default: `http://localhost:1234/v1`)
-- `LMSTUDIO_API_KEY`: API key for authentication (default: `lm-studio`)
-- `LMSTUDIO_MODEL`: Model ID to use (default: `openai/gpt-oss-20b`)
+**For Azure OpenAI (Cloud):**
+```bash
+cp .env.azureopenai.example .env
+# Edit .env with your Azure credentials
+dotnet run
+```
 
-### Azure OpenAI or proxy frontends
+### Key Configuration
 
-Set `LLM_PROVIDER=AzureOpenAI` and supply:
+**Switch providers** by changing one variable:
+- `LLM_PROVIDER=LmStudio` - Use local LM Studio or OpenAI-compatible endpoints
+- `LLM_PROVIDER=AzureOpenAI` - Use Azure OpenAI Service
 
-- `AZURE_OPENAI_ENDPOINT`: Base URL for your Azure OpenAI resource or proxy
-- `AZURE_OPENAI_API_KEY`: API key (or proxy-issued key) to authenticate requests
-- `AZURE_OPENAI_DEPLOYMENT`: Deployment name (maps to the chat model to invoke)
-- `AZURE_OPENAI_API_VERSION`: Optional service version. Accepts either the enum name (`V2024_10_21`) or the raw version string (`2024-10-21-preview`). The latest supported version is used if omitted or unrecognized.
+**LM Studio variables:**
+- `LMSTUDIO_ENDPOINT` - API endpoint (default: `http://localhost:1234/v1`)
+- `LMSTUDIO_API_KEY` - Authentication key (default: `lm-studio`)
+- `LMSTUDIO_MODEL` - Model identifier (default: `openai/gpt-oss-20b`)
 
-If you're routing through a proxy, point `AZURE_OPENAI_ENDPOINT` at the proxy URL—it must forward requests using the Azure OpenAI REST surface so the SDK can attach the required `api-version`.
+**Azure OpenAI variables:**
+- `AZURE_OPENAI_ENDPOINT` - Azure resource URL (e.g., `https://your-name.openai.azure.com/`)
+- `AZURE_OPENAI_API_KEY` - Azure API key
+- `AZURE_OPENAI_DEPLOYMENT` - Deployment name (e.g., `gpt-4o`)
+- `AZURE_OPENAI_API_VERSION` - API version (optional, defaults to latest)
 
-### Shared agent tuning
+**Workflow tuning:**
+- `MINIMUM_RATING` - Quality threshold 1-10 (default: 7)
+- `MAX_ATTEMPTS` - Maximum retry attempts (default: 3)
 
-- `MINIMUM_RATING`: Minimum quality rating for verification (default: 7)
-- `MAX_ATTEMPTS`: Maximum retry attempts for recovery (default: 3)
+📚 **For detailed configuration, examples, and troubleshooting, see [CONFIGURATION.md](CONFIGURATION.md)**
 
 ## Running the Application
 
