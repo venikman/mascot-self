@@ -1,64 +1,35 @@
 # Frontend OpenTelemetry Example
 
-This document describes the frontend OpenTelemetry integration example implemented in this project.
+This document describes the React + TypeScript frontend with OpenTelemetry integration.
 
 ## Overview
 
 This example demonstrates how to:
-1. Collect OpenTelemetry traces from a browser-based frontend application
-2. Send trace data to a backend proxy endpoint
+1. Collect OpenTelemetry traces from a React browser application
+2. Send trace data to a backend proxy endpoint via OTLP/HTTP
 3. Log the received telemetry data in JSONL format on the backend
 
-## Available Implementations
+## Implementation
 
-This project provides **two frontend implementations**:
+**Location:** `AgentLmLocal/ClientApp/`
 
-### 1. React + TypeScript (Recommended) - `AgentLmLocal/ClientApp/`
-
-**Modern, production-ready implementation:**
-- ✅ React 18 with TypeScript
-- ✅ Bun for fast package management
-- ✅ Vite for instant hot reload
-- ✅ Proper npm packages (not CDN)
-- ✅ Custom React hooks
+**Tech Stack:**
+- ✅ React 18 with TypeScript for type safety
+- ✅ Bun for everything (package manager, bundler, dev server)
+- ✅ OpenTelemetry Web SDK with proper npm packages
+- ✅ Custom React hooks for telemetry management
 - ✅ Component-based architecture
-- ✅ Type-safe OpenTelemetry integration
-
-**Best for:**
-- Production applications
-- Teams using React
-- Projects requiring type safety
-- Applications with complex UI requirements
+- ✅ Production-ready with optimized builds
 
 **Quick Start:**
 ```bash
 cd AgentLmLocal/ClientApp
-bun install
-bun run dev  # Development server
-bun run build  # Production build
+bun install       # Install dependencies
+bun run dev       # Development server (http://localhost:5173)
+bun run build     # Production build (outputs to ../wwwroot)
 ```
 
-See [AgentLmLocal/ClientApp/README.md](../AgentLmLocal/ClientApp/README.md) for complete documentation.
-
-### 2. Vanilla HTML/JS - `AgentLmLocal/wwwroot/` (Reference)
-
-**Simple implementation for learning:**
-- ✅ No build tools required
-- ✅ CDN-based dependencies
-- ✅ Single HTML file
-- ✅ Easy to understand
-
-**Best for:**
-- Quick prototypes
-- Learning OpenTelemetry
-- Minimal setup requirements
-- Static hosting scenarios
-
-**Note:** The React version is recommended for production use. The vanilla version is kept as a reference implementation.
-
----
-
-The rest of this document covers concepts common to both implementations, with specific notes where they differ.
+See [AgentLmLocal/ClientApp/README.md](../AgentLmLocal/ClientApp/README.md) for complete setup and usage documentation.
 
 ## Architecture
 
@@ -80,27 +51,33 @@ The rest of this document covers concepts common to both implementations, with s
 
 ## Components
 
-### Frontend (`AgentLmLocal/wwwroot/`)
+### Frontend (`AgentLmLocal/ClientApp/`)
 
-#### `index.html`
-- Simple AI chat interface
-- Real-time telemetry status indicator
-- Span counter showing telemetry activity
+**React Components:**
+- `ChatContainer.tsx` - Main chat UI with message list
+- `ChatInput.tsx` - Message input form with auto-focus
+- `ChatMessage.tsx` - Individual message display
+- `TelemetryStatus.tsx` - Live telemetry status and span counter
 
-#### `styles.css`
-- Clean, modern UI styling
-- Responsive design
-- Visual feedback for telemetry status
+**Custom Hooks:**
+- `useOpenTelemetry.ts` - Initializes OTEL and manages lifecycle
+- `useChat.ts` - Chat logic with automatic tracing
 
-#### `app.js`
-- OpenTelemetry Web SDK integration via CDN
-- Automatic instrumentation of user interactions
-- Custom spans for:
-  - Page load
-  - User input events
-  - Chat API requests
-  - UI updates
-  - Error tracking
+**Services:**
+- `telemetry.ts` - Singleton TelemetryService with subscription pattern
+- `chatApi.ts` - API client with OTEL tracing using `withSpan()`
+
+**Build Tools:**
+- `build.ts` - Bun build script for production
+- `server.ts` - Bun dev server with proxy
+
+**Automatic Instrumentation:**
+- Page load events
+- User input tracking
+- Chat API requests with timing
+- UI update spans
+- Error tracking
+- Visibility change detection
 
 ### Backend (`AgentLmLocal/`)
 

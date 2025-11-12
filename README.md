@@ -98,13 +98,9 @@ For complete details, see [docs/SERILOG-OTEL-HYBRID.md](docs/SERILOG-OTEL-HYBRID
 
 ### Frontend OpenTelemetry Integration
 
-The project includes a **frontend OpenTelemetry example** that demonstrates how to collect and export telemetry from browser-based applications. Two implementations are available:
+The project includes a **React + TypeScript frontend** that demonstrates how to collect and export telemetry from browser-based applications.
 
-#### React + TypeScript Version (Recommended)
-
-Modern React application built entirely with Bun - no Vite, no Webpack!
-
-**Features:**
+**Tech Stack:**
 - React 18 with TypeScript for type safety
 - OpenTelemetry Web SDK with proper npm packages
 - Custom React hooks for telemetry management
@@ -126,23 +122,18 @@ cd AgentLmLocal/ClientApp
 bun run build  # Bun's native bundler outputs to ../wwwroot
 ```
 
-See [AgentLmLocal/ClientApp/README.md](AgentLmLocal/ClientApp/README.md) for details.
-
-#### Vanilla HTML/JS Version
-
-Simple implementation using CDN imports (located in `wwwroot/` - for reference).
-
-**Shared Backend Components:**
+**Backend Endpoints:**
 - `POST /otel/traces` - Proxy endpoint that receives telemetry from frontend
 - `POST /chat` - AI chat endpoint for the demo
 - `Models/OtelModels.cs` - OTLP (OpenTelemetry Protocol) data models
+- `Models/ApiModels.cs` - API request/response models
 
 **Access the demo:**
-1. Start the backend: `dotnet run`
-2. For React dev mode: Navigate to `http://localhost:5173`
-3. For production: Navigate to `http://localhost:5000` (after building React app)
+1. Start the backend: `dotnet run` (from `AgentLmLocal/`)
+2. For development: Navigate to `http://localhost:5173` (Bun dev server)
+3. For production: Build first (`bun run build`), then navigate to `http://localhost:5000`
 
-For detailed documentation, see [docs/FRONTEND-OTEL-EXAMPLE.md](docs/FRONTEND-OTEL-EXAMPLE.md).
+For detailed documentation, see [AgentLmLocal/ClientApp/README.md](AgentLmLocal/ClientApp/README.md) and [docs/FRONTEND-OTEL-EXAMPLE.md](docs/FRONTEND-OTEL-EXAMPLE.md).
 
 ## How It Works
 
