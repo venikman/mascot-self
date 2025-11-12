@@ -68,10 +68,6 @@ export function useChat() {
       uiSpan.setAttribute('chat.success', false);
       uiSpan.setAttribute('chat.error', errorMessage);
       uiSpan.setStatus({ code: 2, message: errorMessage });
-
-      telemetryService.recordError(err as Error, {
-        context: 'chat.sendMessage',
-      });
     } finally {
       uiSpan.end();
       telemetryService.incrementSpanCount();

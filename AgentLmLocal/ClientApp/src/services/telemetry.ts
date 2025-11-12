@@ -4,6 +4,9 @@ import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { trace, context, Span, Tracer } from '@opentelemetry/api';
+import { ZoneContextManager } from '@opentelemetry/context-zone';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 import type { OtelExporterConfig } from '../types';
 
 type SpanCountListener = (count: number) => void;
@@ -57,17 +60,28 @@ class TelemetryService {
       })
     );
 
-    // Register the provider
-    this.provider.register();
+    // Register the provider with ZoneContextManager for better async context propagation
+    this.provider.register({
+      contextManager: new ZoneContextManager(),
+    });
 
     // Get tracer instance
     this.tracer = trace.getTracer('ai-chat-frontend', '1.0.0');
 
-    this.isInitialized = true;
-    console.log('OpenTelemetry initialized successfully');
+    // Register auto-instrumentations for automatic infrastructure tracing
+    registerInstrumentations({
+      instrumentations: [
+        getWebAutoInstrumentations({
+          '@opentelemetry/instrumentation-document-load': {},
+          '@opentelemetry/instrumentation-user-interaction': {},
+          '@opentelemetry/instrumentation-fetch': {},
+          '@opentelemetry/instrumentation-xml-http-request': {},
+        }),
+      ],
+    });
 
-    // Create initial span for page load
-    this.recordPageLoad();
+    this.isInitialized = true;
+    console.log('OpenTelemetry initialized successfully with auto-instrumentation');
   }
 
   getTracer(): Tracer {
@@ -98,41 +112,10 @@ class TelemetryService {
     this.listeners.forEach((listener) => listener(this.spanCount));
   }
 
-  recordPageLoad(): void {
-    const span = this.getTracer().startSpan('page.load');
-    span.setAttribute('page.url', window.location.href);
-    span.setAttribute('page.title', document.title);
-    span.end();
-    this.incrementSpanCount();
-  }
-
   recordUserInput(inputLength: number): void {
     const span = this.getTracer().startSpan('user.input');
     span.setAttribute('input.length', inputLength);
     span.setAttribute('input.timestamp', Date.now());
-    span.end();
-    this.incrementSpanCount();
-  }
-
-  recordVisibilityChange(hidden: boolean): void {
-    const span = this.getTracer().startSpan('page.visibility.change');
-    span.setAttribute('page.hidden', hidden);
-    span.end();
-    this.incrementSpanCount();
-  }
-
-  recordError(error: Error, context?: Record<string, unknown>): void {
-    const span = this.getTracer().startSpan('error.unhandled');
-    span.setAttribute('error.message', error.message);
-    span.setAttribute('error.stack', error.stack || '');
-
-    if (context) {
-      Object.entries(context).forEach(([key, value]) => {
-        span.setAttribute(`error.context.${key}`, String(value));
-      });
-    }
-
-    span.setStatus({ code: 2, message: error.message });
     span.end();
     this.incrementSpanCount();
   }

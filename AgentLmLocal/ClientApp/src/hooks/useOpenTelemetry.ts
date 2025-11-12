@@ -27,31 +27,9 @@ export function useOpenTelemetry() {
       setStatus((prev) => ({ ...prev, spanCount: count }));
     });
 
-    // Track visibility changes
-    const handleVisibilityChange = () => {
-      telemetryService.recordVisibilityChange(document.hidden);
-    };
-
-    // Track errors
-    const handleError = (event: ErrorEvent) => {
-      // Guard against null/undefined errors to prevent telemetry crashes
-      if (event.error) {
-        telemetryService.recordError(event.error, {
-          filename: event.filename,
-          lineno: event.lineno,
-          colno: event.colno,
-        });
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('error', handleError);
-
     // Cleanup
     return () => {
       unsubscribe();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('error', handleError);
       telemetryService.shutdown();
     };
   }, []);
