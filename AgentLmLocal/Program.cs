@@ -3,6 +3,7 @@ using AgentLmLocal.Configuration;
 using AgentLmLocal.Services;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -14,8 +15,6 @@ using OpenTelemetry;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Serilog;
-using Serilog.Enrichers.Span;
-using Serilog.Formatting.Compact;
 using WorkflowCustomAgentExecutorsSample;
 
 namespace AgentLmLocal;
@@ -26,25 +25,30 @@ public static class Program
     {
         var builder = WebApplication.CreateBuilder(args);
 
+        var observabilitySection = builder.Configuration.GetSection("Observability");
+        var serviceName = observabilitySection.GetValue<string>("ServiceName") ?? "AgentLmLocal";
+        var serviceNamespace = observabilitySection.GetValue<string>("ServiceNamespace") ?? "multi-agent-workflow";
+        var serviceVersion = observabilitySection.GetValue<string>("ServiceVersion") ?? "1.0.0";
+
         // Configure Serilog for structured logging to stdout
-        builder.Host.UseSerilog((context, services, configuration) => configuration
-            .ReadFrom.Configuration(context.Configuration)
-            .ReadFrom.Services(services)
-            .Enrich.FromLogContext()
-            .Enrich.WithSpan()  // Adds TraceId/SpanId from OpenTelemetry
-            .Enrich.WithMachineName()
-            .Enrich.WithEnvironmentName()
-            .Enrich.WithProperty("ServiceName", "AgentLmLocal")
-            .WriteTo.Console(new CompactJsonFormatter()));
+        builder.Host.UseSerilog((context, services, configuration) =>
+        {
+            configuration
+                .ReadFrom.Configuration(context.Configuration)
+                .ReadFrom.Services(services)
+                .Enrich.WithProperty("service.name", serviceName)
+                .Enrich.WithProperty("service.version", serviceVersion)
+                .Enrich.WithProperty("service.namespace", serviceNamespace);
+        });
 
         // Configure OpenTelemetry for distributed tracing
         builder.Services.AddOpenTelemetry()
             .ConfigureResource(resource => resource
-                .AddService("AgentLmLocal", serviceVersion: "1.0.0")
+                .AddService(serviceName, serviceVersion: serviceVersion)
                 .AddAttributes(new Dictionary<string, object>
                 {
                     ["deployment.environment"] = builder.Environment.EnvironmentName,
-                    ["service.namespace"] = "multi-agent-workflow"
+                    ["service.namespace"] = serviceNamespace
                 }))
             .WithTracing(tracing => tracing
                 .AddAspNetCoreInstrumentation(options =>
