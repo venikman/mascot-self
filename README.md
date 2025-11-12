@@ -98,23 +98,48 @@ For complete details, see [docs/SERILOG-OTEL-HYBRID.md](docs/SERILOG-OTEL-HYBRID
 
 ### Frontend OpenTelemetry Integration
 
-The project includes a **frontend OpenTelemetry example** that demonstrates how to collect and export telemetry from browser-based applications.
+The project includes a **frontend OpenTelemetry example** that demonstrates how to collect and export telemetry from browser-based applications. Two implementations are available:
+
+#### React + TypeScript Version (Recommended)
+
+Modern React application with TypeScript, Bun, and Vite:
 
 **Features:**
-- Simple AI chat interface with real-time telemetry visualization
-- OpenTelemetry Web SDK integration via CDN
-- Automatic instrumentation of user interactions and API calls
-- Backend proxy endpoint that receives OTLP data and logs it in JSONL format
-- End-to-end tracing from frontend to backend
+- React 18 with TypeScript for type safety
+- OpenTelemetry Web SDK with proper npm packages
+- Custom React hooks for telemetry management
+- Component-based architecture
+- Bun for fast package management
+- Vite for instant hot reload and optimized builds
 
-**Access the demo:**
-Navigate to `http://localhost:5000` after starting the application to see the AI chat interface with live telemetry tracking.
+**Development:**
+```bash
+cd AgentLmLocal/ClientApp
+bun install
+bun run dev  # Starts on http://localhost:5173
+```
 
-**Key components:**
+**Production Build:**
+```bash
+cd AgentLmLocal/ClientApp
+bun run build  # Outputs to ../wwwroot
+```
+
+See [AgentLmLocal/ClientApp/README.md](AgentLmLocal/ClientApp/README.md) for details.
+
+#### Vanilla HTML/JS Version
+
+Simple implementation using CDN imports (located in `wwwroot/` - for reference).
+
+**Shared Backend Components:**
 - `POST /otel/traces` - Proxy endpoint that receives telemetry from frontend
 - `POST /chat` - AI chat endpoint for the demo
-- `wwwroot/app.js` - OpenTelemetry instrumentation and trace collection
 - `Models/OtelModels.cs` - OTLP (OpenTelemetry Protocol) data models
+
+**Access the demo:**
+1. Start the backend: `dotnet run`
+2. For React dev mode: Navigate to `http://localhost:5173`
+3. For production: Navigate to `http://localhost:5000` (after building React app)
 
 For detailed documentation, see [docs/FRONTEND-OTEL-EXAMPLE.md](docs/FRONTEND-OTEL-EXAMPLE.md).
 

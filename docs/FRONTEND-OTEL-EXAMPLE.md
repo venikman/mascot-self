@@ -9,6 +9,57 @@ This example demonstrates how to:
 2. Send trace data to a backend proxy endpoint
 3. Log the received telemetry data in JSONL format on the backend
 
+## Available Implementations
+
+This project provides **two frontend implementations**:
+
+### 1. React + TypeScript (Recommended) - `AgentLmLocal/ClientApp/`
+
+**Modern, production-ready implementation:**
+- ✅ React 18 with TypeScript
+- ✅ Bun for fast package management
+- ✅ Vite for instant hot reload
+- ✅ Proper npm packages (not CDN)
+- ✅ Custom React hooks
+- ✅ Component-based architecture
+- ✅ Type-safe OpenTelemetry integration
+
+**Best for:**
+- Production applications
+- Teams using React
+- Projects requiring type safety
+- Applications with complex UI requirements
+
+**Quick Start:**
+```bash
+cd AgentLmLocal/ClientApp
+bun install
+bun run dev  # Development server
+bun run build  # Production build
+```
+
+See [AgentLmLocal/ClientApp/README.md](../AgentLmLocal/ClientApp/README.md) for complete documentation.
+
+### 2. Vanilla HTML/JS - `AgentLmLocal/wwwroot/` (Reference)
+
+**Simple implementation for learning:**
+- ✅ No build tools required
+- ✅ CDN-based dependencies
+- ✅ Single HTML file
+- ✅ Easy to understand
+
+**Best for:**
+- Quick prototypes
+- Learning OpenTelemetry
+- Minimal setup requirements
+- Static hosting scenarios
+
+**Note:** The React version is recommended for production use. The vanilla version is kept as a reference implementation.
+
+---
+
+The rest of this document covers concepts common to both implementations, with specific notes where they differ.
+
 ## Architecture
 
 ```

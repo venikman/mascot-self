@@ -1,0 +1,35 @@
+{
+  "name": "ai-chat-otel-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@ai-sdk/ui-utils": "^1.0.6",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-trace-base": "^1.28.0",
+    "@opentelemetry/sdk-trace-web": "^1.28.0",
+    "@opentelemetry/semantic-conventions": "^1.27.0",
+    "ai": "^4.0.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.15.0",
+    "@typescript-eslint/parser": "^8.15.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.15.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.14",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.1"
+  }
+}
