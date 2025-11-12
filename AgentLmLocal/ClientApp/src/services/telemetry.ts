@@ -24,16 +24,30 @@ class TelemetryService {
 
     console.log('Initializing OpenTelemetry...');
 
+    // Merge configuration with defaults
+    const serviceName = config.resourceAttributes?.serviceName ?? 'ai-chat-frontend';
+    const serviceVersion = config.resourceAttributes?.serviceVersion ?? packageJson.version;
+    const environment = config.resourceAttributes?.environment ?? import.meta.env.MODE;
+
     // Create resource with service metadata
-    const resource = Resource.default().merge(
-      new Resource({
-        [ATTR_SERVICE_NAME]: 'ai-chat-frontend',
-        [ATTR_SERVICE_VERSION]: packageJson.version,
-        'deployment.environment': import.meta.env.MODE,
-        'browser.user_agent': navigator.userAgent,
-        'browser.language': navigator.language,
-      })
-    );
+    const resourceAttrs: Record<string, string> = {
+      [ATTR_SERVICE_NAME]: serviceName,
+      [ATTR_SERVICE_VERSION]: serviceVersion,
+      'deployment.environment': environment,
+      'browser.user_agent': navigator.userAgent,
+      'browser.language': navigator.language,
+    };
+
+    // Add custom resource attributes if provided
+    if (config.resourceAttributes) {
+      Object.entries(config.resourceAttributes).forEach(([key, value]) => {
+        if (key !== 'serviceName' && key !== 'serviceVersion' && key !== 'environment' && value !== undefined) {
+          resourceAttrs[key] = value;
+        }
+      });
+    }
+
+    const resource = Resource.default().merge(new Resource(resourceAttrs));
 
     // Create OTLP exporter pointing to our proxy endpoint
     const baseExporter = new OTLPTraceExporter({
@@ -60,13 +74,13 @@ class TelemetryService {
 
     // Add batch span processor with the exporter
     // Tuned for browser context: smaller batches, faster export to prevent data loss on tab close
-    this.provider.addSpanProcessor(
-      new BatchSpanProcessor(exporter, {
-        maxQueueSize: 256,         // Reasonable queue size for browser
-        maxExportBatchSize: 50,    // Efficient batch size without over-batching
-        scheduledDelayMillis: 2000, // 2s delay - safer for browsers (users close tabs quickly)
-      })
-    );
+    const batchSettings = {
+      maxQueueSize: config.batchSettings?.maxQueueSize ?? 256,
+      maxExportBatchSize: config.batchSettings?.maxExportBatchSize ?? 50,
+      scheduledDelayMillis: config.batchSettings?.scheduledDelayMillis ?? 2000,
+    };
+
+    this.provider.addSpanProcessor(new BatchSpanProcessor(exporter, batchSettings));
 
     // Register the provider with ZoneContextManager for better async context propagation
     this.provider.register({
@@ -74,18 +88,34 @@ class TelemetryService {
     });
 
     // Get tracer instance
-    this.tracer = trace.getTracer('ai-chat-frontend', packageJson.version);
+    this.tracer = trace.getTracer(serviceName, serviceVersion);
 
     // Register auto-instrumentations for automatic infrastructure tracing
+    // Use configuration or enable all by default
+    const instrumentationConfig = config.instrumentations ?? {
+      documentLoad: true,
+      userInteraction: true,
+      fetch: true,
+      xhr: true,
+    };
+
+    const autoInstrumentations: Record<string, any> = {};
+
+    if (instrumentationConfig.documentLoad !== false) {
+      autoInstrumentations['@opentelemetry/instrumentation-document-load'] = {};
+    }
+    if (instrumentationConfig.userInteraction !== false) {
+      autoInstrumentations['@opentelemetry/instrumentation-user-interaction'] = {};
+    }
+    if (instrumentationConfig.fetch !== false) {
+      autoInstrumentations['@opentelemetry/instrumentation-fetch'] = {};
+    }
+    if (instrumentationConfig.xhr !== false) {
+      autoInstrumentations['@opentelemetry/instrumentation-xml-http-request'] = {};
+    }
+
     registerInstrumentations({
-      instrumentations: [
-        getWebAutoInstrumentations({
-          '@opentelemetry/instrumentation-document-load': {},
-          '@opentelemetry/instrumentation-user-interaction': {},
-          '@opentelemetry/instrumentation-fetch': {},
-          '@opentelemetry/instrumentation-xml-http-request': {},
-        }),
-      ],
+      instrumentations: [getWebAutoInstrumentations(autoInstrumentations)],
     });
 
     this.isInitialized = true;
