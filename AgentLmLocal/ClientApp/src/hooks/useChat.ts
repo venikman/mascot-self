@@ -24,7 +24,7 @@ export function useChat() {
 
     // Add user message
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content,
       timestamp: new Date(),
@@ -41,7 +41,7 @@ export function useChat() {
 
       // Add assistant message
       const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'assistant',
         content: responseText,
         timestamp: new Date(),
@@ -58,7 +58,7 @@ export function useChat() {
 
       // Add error message
       const errorMsg: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: crypto.randomUUID(),
         role: 'system',
         content: `Error: ${errorMessage}`,
         timestamp: new Date(),

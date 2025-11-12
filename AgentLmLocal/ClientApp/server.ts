@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 // Bun dev server with hot reload and proxy
-const PORT = 5173;
-const BACKEND_URL = 'http://localhost:5000';
+const PORT = parseInt(process.env.PORT || '5173', 10);
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:5000';
 
 console.log('🚀 Starting Bun dev server...');
 

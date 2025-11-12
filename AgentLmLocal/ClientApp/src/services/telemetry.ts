@@ -6,11 +6,14 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { trace, context, Span, Tracer } from '@opentelemetry/api';
 import type { OtelExporterConfig } from '../types';
 
+type SpanCountListener = (count: number) => void;
+
 class TelemetryService {
   private tracer: Tracer | null = null;
   private provider: WebTracerProvider | null = null;
   private spanCount = 0;
   private isInitialized = false;
+  private listeners: Set<SpanCountListener> = new Set();
 
   initialize(config: OtelExporterConfig = { url: '/otel/traces' }): void {
     if (this.isInitialized) {
@@ -80,6 +83,19 @@ class TelemetryService {
 
   incrementSpanCount(): void {
     this.spanCount++;
+    this.notifyListeners();
+  }
+
+  subscribeToSpanCount(listener: SpanCountListener): () => void {
+    this.listeners.add(listener);
+    // Return unsubscribe function
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((listener) => listener(this.spanCount));
   }
 
   recordPageLoad(): void {

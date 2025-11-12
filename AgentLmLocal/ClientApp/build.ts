@@ -24,9 +24,9 @@ const result = await Bun.build({
   minify: true,
   sourcemap: 'external',
   naming: {
-    entry: '[dir]/[name].[hash].[ext]',
-    chunk: '[dir]/[name].[hash].[ext]',
-    asset: '[dir]/[name].[hash].[ext]',
+    entry: '[name].[hash].[ext]',
+    chunk: '[name].[hash].[ext]',
+    asset: '[name].[hash].[ext]',
   },
   external: [],
 });

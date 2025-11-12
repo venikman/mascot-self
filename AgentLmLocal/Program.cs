@@ -257,7 +257,4 @@ public static class Program
         if (value.BoolValue.HasValue) return value.BoolValue.Value;
         return null;
     }
-
-    private sealed record RunRequest(string Task);
-    private sealed record ChatRequest(string Message);
 }

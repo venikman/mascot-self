@@ -9,67 +9,47 @@ export class ChatApi {
   }
 
   async sendMessage(message: string): Promise<string> {
-    const chatSpan = telemetryService.startSpan('chat.interaction', {
-      'chat.message': message,
-      'chat.message.length': message.length,
-    });
+    return telemetryService.withSpan(
+      'chat.interaction',
+      async (chatSpan) => {
+        chatSpan.setAttribute('chat.message', message);
+        chatSpan.setAttribute('chat.message.length', message.length);
 
-    try {
-      // Create span for API request
-      const apiSpan = telemetryService.startSpan('chat.api.request', {
-        'http.method': 'POST',
-        'http.url': '/chat',
-      });
+        const responseText = await telemetryService.withSpan(
+          'chat.api.request',
+          async (apiSpan) => {
+            apiSpan.setAttribute('http.method', 'POST');
+            apiSpan.setAttribute('http.url', '/chat');
 
-      const requestStartTime = performance.now();
+            const requestStartTime = performance.now();
 
-      try {
-        const response = await fetch(`${this.baseUrl}/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message } as ChatRequest),
-        });
+            const response = await fetch(`${this.baseUrl}/chat`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ message } as ChatRequest),
+            });
 
-        const requestDuration = performance.now() - requestStartTime;
-        apiSpan.setAttribute('http.status_code', response.status);
-        apiSpan.setAttribute('http.response_time_ms', requestDuration);
+            const requestDuration = performance.now() - requestStartTime;
+            apiSpan.setAttribute('http.status_code', response.status);
+            apiSpan.setAttribute('http.response_time_ms', requestDuration);
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
 
-        const data: ChatResponse = await response.json();
+            const data: ChatResponse = await response.json();
+            return data.message;
+          }
+        );
 
-        apiSpan.setStatus({ code: 1 }); // OK
-        apiSpan.end();
-        telemetryService.incrementSpanCount();
-
-        chatSpan.setStatus({ code: 1 }); // OK
         chatSpan.setAttribute('chat.success', true);
-        chatSpan.setAttribute('chat.response.length', data.message.length);
-        chatSpan.end();
-        telemetryService.incrementSpanCount();
+        chatSpan.setAttribute('chat.response.length', responseText.length);
 
-        return data.message;
-      } catch (error) {
-        apiSpan.setStatus({ code: 2, message: (error as Error).message }); // ERROR
-        apiSpan.recordException(error as Error);
-        apiSpan.end();
-        telemetryService.incrementSpanCount();
-
-        throw error;
+        return responseText;
       }
-    } catch (error) {
-      chatSpan.setStatus({ code: 2, message: (error as Error).message }); // ERROR
-      chatSpan.setAttribute('chat.success', false);
-      chatSpan.setAttribute('chat.error', (error as Error).message);
-      chatSpan.end();
-      telemetryService.incrementSpanCount();
-
-      throw error;
-    }
+    );
   }
 }
 

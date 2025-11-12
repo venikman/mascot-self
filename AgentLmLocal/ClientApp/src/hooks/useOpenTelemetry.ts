@@ -12,7 +12,7 @@ export function useOpenTelemetry() {
     // Initialize OpenTelemetry
     try {
       telemetryService.initialize();
-      setStatus((prev) => ({ ...prev, isActive: true }));
+      setStatus((prev) => ({ ...prev, isActive: true, spanCount: telemetryService.getSpanCount() }));
     } catch (error) {
       console.error('Failed to initialize OpenTelemetry:', error);
       setStatus((prev) => ({
@@ -22,10 +22,14 @@ export function useOpenTelemetry() {
       }));
     }
 
+    // Subscribe to span count changes
+    const unsubscribe = telemetryService.subscribeToSpanCount((count) => {
+      setStatus((prev) => ({ ...prev, spanCount: count }));
+    });
+
     // Track visibility changes
     const handleVisibilityChange = () => {
       telemetryService.recordVisibilityChange(document.hidden);
-      updateSpanCount();
     };
 
     // Track errors
@@ -35,25 +39,14 @@ export function useOpenTelemetry() {
         lineno: event.lineno,
         colno: event.colno,
       });
-      updateSpanCount();
     };
-
-    // Update span count periodically
-    const updateSpanCount = () => {
-      setStatus((prev) => ({
-        ...prev,
-        spanCount: telemetryService.getSpanCount(),
-      }));
-    };
-
-    const intervalId = setInterval(updateSpanCount, 1000);
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('error', handleError);
 
     // Cleanup
     return () => {
-      clearInterval(intervalId);
+      unsubscribe();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('error', handleError);
       telemetryService.shutdown();
