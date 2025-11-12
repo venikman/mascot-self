@@ -237,10 +237,10 @@ bun install --force
 
 If port 5173 is in use:
 ```bash
-# Edit vite.config.ts and change the port
-server: {
-  port: 3000, // or any other available port
-}
+# Edit server.ts and change the port number on the following line:
+const PORT = 3000; // or any other available port
+
+# (Default is 5173. Save and restart the dev server.)
 ```
 
 ### Build Errors

@@ -3,7 +3,7 @@ import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { trace, context, Span, Tracer } from '@opentelemetry/api';
+import { trace, Span, Tracer } from '@opentelemetry/api';
 import type { OtelExporterConfig } from '../types';
 
 type SpanCountListener = (count: number) => void;

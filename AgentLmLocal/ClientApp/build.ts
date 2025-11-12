@@ -2,12 +2,18 @@
 
 // Bun build script for production
 import { $ } from 'bun';
+import * as fs from 'fs';
 
 console.log('🔨 Building with Bun...');
 
 // Clean output directory
 console.log('📁 Cleaning output directory...');
-await $`rm -rf ../wwwroot/*`;
+const wwwrootPath = '../wwwroot';
+if (!fs.existsSync(wwwrootPath) || !fs.statSync(wwwrootPath).isDirectory()) {
+  console.error(`❌ Output directory "${wwwrootPath}" does not exist or is not a directory. Aborting clean step.`);
+  process.exit(1);
+}
+await $`rm -rf ${wwwrootPath}/*`;
 
 // Copy index.html to wwwroot
 console.log('📄 Copying index.html...');

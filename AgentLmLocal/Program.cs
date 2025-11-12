@@ -107,7 +107,13 @@ public static class Program
                         var spanAttributes = span.Attributes
                             .ToDictionary(kv => kv.Key, kv => GetAttributeValue(kv.Value));
 
-                        var durationNano = long.Parse(span.EndTimeUnixNano) - long.Parse(span.StartTimeUnixNano);
+                        if (!long.TryParse(span.EndTimeUnixNano, out var endTimeUnixNano) ||
+                            !long.TryParse(span.StartTimeUnixNano, out var startTimeUnixNano))
+                        {
+                            logger.LogWarning("Invalid span timestamp(s): EndTimeUnixNano='{End}', StartTimeUnixNano='{Start}'", span.EndTimeUnixNano, span.StartTimeUnixNano);
+                            continue;
+                        }
+                        var durationNano = endTimeUnixNano - startTimeUnixNano;
                         var durationMs = durationNano / 1_000_000.0;
 
                         logger.LogInformation(
@@ -145,7 +151,7 @@ public static class Program
 
                 return Results.Ok(new { message = responseText });
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 logger.LogError(ex, "Error generating chat response");
                 return Results.Problem("Error generating response");

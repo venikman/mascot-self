@@ -201,7 +201,7 @@ The frontend automatically creates spans for:
 
 ### Prerequisites
 
-1. .NET 9.0 SDK
+1. .NET 10.0 SDK
 2. LM Studio or compatible OpenAI API endpoint
 3. Modern web browser with JavaScript enabled
 
