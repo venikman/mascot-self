@@ -1,0 +1,31 @@
+{
+  "name": "ai-chat-otel-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run server.ts",
+    "build": "bun run build.ts",
+    "preview": "bun run --cwd ../wwwroot server.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/ui-utils": "^1.0.6",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/auto-instrumentations-web": "^0.41.0",
+    "@opentelemetry/context-zone": "^1.28.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.55.0",
+    "@opentelemetry/instrumentation": "^0.55.0",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-trace-base": "^1.28.0",
+    "@opentelemetry/sdk-trace-web": "^1.28.0",
+    "@opentelemetry/semantic-conventions": "^1.27.0",
+    "ai": "^4.0.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.13",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.6.3"
+  }
+}
