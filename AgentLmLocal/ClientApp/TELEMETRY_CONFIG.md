@@ -1,6 +1,6 @@
-# OpenTelemetry Configuration Guide
+# OpenTelemetry Configuration
 
-This document explains all configuration options available for the frontend OpenTelemetry implementation.
+Quick reference for configuring frontend OpenTelemetry auto-instrumentation.
 
 ## Configuration Interface
 
@@ -16,289 +16,104 @@ interface OtelExporterConfig {
   };
 
   instrumentations?: {
-    documentLoad?: boolean;    // Default: true
-    userInteraction?: boolean; // Default: true
-    fetch?: boolean;          // Default: true
-    xhr?: boolean;            // Default: true
+    documentLoad?: boolean;    // Default: true - Page load timing
+    userInteraction?: boolean; // Default: true - Click tracking
+    fetch?: boolean;          // Default: true - HTTP fetch() calls
+    xhr?: boolean;            // Default: true - XMLHttpRequest calls
   };
 
   resourceAttributes?: {
     serviceName?: string;      // Default: 'ai-chat-frontend'
     serviceVersion?: string;   // Default: from package.json
-    environment?: string;      // Default: import.meta.env.MODE
+    environment?: string;      // Default: process.env.NODE_ENV
     [key: string]: string | undefined; // Custom attributes
   };
 }
 ```
 
-## Usage Examples
+## Basic Usage
 
-### Basic Usage (Default Configuration)
-
+**Default configuration** (recommended for prototypes):
 ```typescript
 import { telemetryService } from './services/telemetry';
 
-// Uses all defaults
 telemetryService.initialize({
   url: '/otel/traces'
 });
 ```
 
-### Custom Batch Settings
+## Custom Configuration Example
 
-Optimize for different scenarios:
-
-**High-Volume Application:**
 ```typescript
 telemetryService.initialize({
   url: '/otel/traces',
+
+  // Tune batching for browser apps
   batchSettings: {
-    maxQueueSize: 512,           // Larger queue
-    maxExportBatchSize: 100,     // Bigger batches
-    scheduledDelayMillis: 5000,  // 5s delay
-  }
-});
-```
-
-**Real-Time Analytics (Low Latency):**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  batchSettings: {
-    maxQueueSize: 100,
-    maxExportBatchSize: 10,
-    scheduledDelayMillis: 500,   // 500ms - faster export
-  }
-});
-```
-
-**Memory-Constrained Devices:**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  batchSettings: {
-    maxQueueSize: 50,            // Smaller queue
-    maxExportBatchSize: 10,
-    scheduledDelayMillis: 1000,
-  }
-});
-```
-
-### Selective Instrumentation
-
-Disable specific instrumentations to reduce overhead:
-
-**API-Only Tracing (No User Interaction):**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  instrumentations: {
-    documentLoad: true,
-    userInteraction: false,  // Disable user interaction tracking
-    fetch: true,
-    xhr: true,
-  }
-});
-```
-
-**Minimal Instrumentation (Fetch Only):**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  instrumentations: {
-    documentLoad: false,
-    userInteraction: false,
-    fetch: true,             // Only track HTTP requests
-    xhr: false,
-  }
-});
-```
-
-### Custom Resource Attributes
-
-Add custom metadata for better trace identification:
-
-**Multi-Tenant Application:**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  resourceAttributes: {
-    serviceName: 'my-app-frontend',
-    serviceVersion: '2.0.0',
-    environment: 'production',
-    'tenant.id': getTenantId(),
-    'app.region': 'us-east-1',
-    'deployment.stage': 'blue',
-  }
-});
-```
-
-**Feature Flag Tracking:**
-```typescript
-telemetryService.initialize({
-  url: '/otel/traces',
-  resourceAttributes: {
-    'feature.new_ui': 'enabled',
-    'feature.beta_features': 'disabled',
-    'user.segment': 'premium',
-  }
-});
-```
-
-### Production Configuration
-
-Complete production-ready configuration:
-
-```typescript
-telemetryService.initialize({
-  url: process.env.OTEL_EXPORTER_URL || '/otel/traces',
-
-  headers: {
-    'Authorization': `Bearer ${getAuthToken()}`,
-    'X-API-Key': process.env.OTEL_API_KEY,
+    maxQueueSize: 256,           // Queue size
+    maxExportBatchSize: 50,      // Batch size
+    scheduledDelayMillis: 2000,  // 2s delay (prevents data loss on tab close)
   },
 
-  batchSettings: {
-    maxQueueSize: 256,
-    maxExportBatchSize: 50,
-    scheduledDelayMillis: 2000,
-  },
-
+  // Disable instrumentations you don't need
   instrumentations: {
     documentLoad: true,
     userInteraction: true,
-    fetch: true,
-    xhr: true,
+    fetch: true,              // Keep for API monitoring
+    xhr: false,               // Disable if not using XMLHttpRequest
   },
 
+  // Add custom metadata
   resourceAttributes: {
-    serviceName: 'my-app-frontend',
-    serviceVersion: process.env.APP_VERSION,
-    environment: process.env.NODE_ENV,
-    'deployment.region': process.env.AWS_REGION,
-    'deployment.version': process.env.BUILD_NUMBER,
-    'team.owner': 'platform-team',
+    serviceName: 'my-app',
+    environment: 'production',
+    'tenant.id': getTenantId(),
   }
 });
 ```
 
-## Configuration Best Practices
+## Configuration Tips
 
-### Batch Settings
+**Batch Settings:**
+- Browser apps: Keep `scheduledDelayMillis: 2000` (2s) to prevent data loss when users close tabs
+- High volume: Increase `maxExportBatchSize` to 100
+- Low latency: Decrease `scheduledDelayMillis` to 500ms
 
-- **Browser apps**: Use `scheduledDelayMillis: 2000` (2s) to prevent data loss when users close tabs
-- **High-volume**: Increase `maxExportBatchSize` to 100-200 for efficiency
-- **Low-latency**: Decrease `scheduledDelayMillis` to 500-1000ms for real-time visibility
-- **Memory-constrained**: Reduce `maxQueueSize` to 50-100
-
-### Instrumentations
-
-- Disable `userInteraction` for backend-focused debugging
-- Disable `documentLoad` for SPAs that don't navigate
+**Instrumentations:**
+- Disable `userInteraction` if you only care about API calls
+- Disable `xhr` if your app only uses `fetch()`
 - Keep `fetch` enabled for API monitoring
-- Disable `xhr` if your app only uses fetch
 
-### Resource Attributes
-
+**Resource Attributes:**
 - Always set `environment` (dev/staging/prod)
-- Include `serviceVersion` for release tracking
-- Add deployment metadata for incident correlation
-- Use custom attributes for tenant/user segmentation
-
-## Performance Impact
-
-| Instrumentation | Overhead | Use Case |
-|----------------|----------|----------|
-| documentLoad   | Low      | Page navigation tracking |
-| userInteraction| Medium   | Click/interaction analytics |
-| fetch          | Low      | API monitoring |
-| xhr            | Low      | Legacy AJAX tracking |
+- Add custom attributes for tenant/user segmentation
 
 ## Troubleshooting
 
-### Spans not appearing in backend
+**Spans not appearing:**
+- Check network tab for POST requests to `/otel/traces`
+- Spans batch before export (wait 2s or trigger activity)
 
-1. Check `scheduledDelayMillis` - spans batch before export
-2. Verify `maxQueueSize` isn't reached (increases delay)
-3. Check network tab for OTLP requests to configured URL
+**High memory usage:**
+- Reduce `maxQueueSize` to 100
+- Disable unused instrumentations
 
-### High memory usage
+## Auto-Instrumentation
 
-1. Reduce `maxQueueSize` (e.g., 50-100)
-2. Reduce `scheduledDelayMillis` for faster flushing
-3. Disable unused instrumentations
+This app uses **automatic instrumentation** - no manual span creation needed!
 
-### Missing user interactions
+Automatically traced:
+- ✅ All `fetch()` HTTP requests
+- ✅ All XMLHttpRequest calls
+- ✅ Document load and page navigation
+- ✅ User interactions (clicks, form submissions)
+- ✅ Errors and exceptions
+- ✅ Async context propagation
 
-1. Ensure `userInteraction: true` in instrumentations
-2. Check if elements have event listeners
-3. Verify Zone.js context propagation
+**You only need manual spans for custom business logic.**
 
-## Environment Variables
-
-You can externalize configuration using environment variables:
-
+Example:
 ```typescript
-telemetryService.initialize({
-  url: import.meta.env.VITE_OTEL_URL || '/otel/traces',
-
-  batchSettings: {
-    maxQueueSize: parseInt(import.meta.env.VITE_OTEL_QUEUE_SIZE || '256'),
-    maxExportBatchSize: parseInt(import.meta.env.VITE_OTEL_BATCH_SIZE || '50'),
-    scheduledDelayMillis: parseInt(import.meta.env.VITE_OTEL_DELAY || '2000'),
-  },
-
-  resourceAttributes: {
-    environment: import.meta.env.MODE,
-    serviceVersion: import.meta.env.VITE_APP_VERSION,
-  }
-});
-```
-
-Example `.env` file:
-
-```bash
-VITE_OTEL_URL=https://otel-collector.example.com/v1/traces
-VITE_OTEL_QUEUE_SIZE=512
-VITE_OTEL_BATCH_SIZE=100
-VITE_OTEL_DELAY=5000
-VITE_APP_VERSION=1.2.3
-```
-
-## Advanced: Custom Spans
-
-While auto-instrumentation handles most cases, you can still create custom spans for business logic:
-
-```typescript
-import { telemetryService } from './services/telemetry';
-
-// Record custom business event
+// Custom business event (one of the few manual spans needed)
 telemetryService.recordUserInput(messageLength);
-
-// The service only exposes minimal API by design
-// Auto-instrumentation handles the rest automatically
-```
-
-## Migration from Manual Instrumentation
-
-If migrating from manual span creation:
-
-1. Remove manual HTTP tracing - now auto-instrumented
-2. Remove page load tracking - now auto-instrumented
-3. Remove error tracking - now auto-instrumented
-4. Keep only domain-specific business logic spans
-
-**Before:**
-```typescript
-// Manual (old way)
-const span = tracer.startSpan('fetch');
-span.setAttribute('http.url', url);
-const response = await fetch(url);
-span.end();
-```
-
-**After:**
-```typescript
-// Auto-instrumented (new way)
-const response = await fetch(url);  // Automatically traced!
 ```
