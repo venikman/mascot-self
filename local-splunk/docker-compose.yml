@@ -1,0 +1,17 @@
+services:
+  splunk:
+    image: splunk/splunk:9.2.1
+    platform: linux/amd64
+    container_name: splunk
+    environment:
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_PASSWORD=changeme123!
+    ports:
+      - "8000:8000"
+      - "8088:8088"
+      - "8089:8089"
+    healthcheck:
+      test: ["CMD", "/bin/bash", "-lc", "curl -sk https://localhost:8089/services/server/info | grep splunkd"]
+      interval: 10s
+      timeout: 5s
+      retries: 12

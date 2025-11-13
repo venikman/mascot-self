@@ -1,0 +1,11 @@
+<Project ToolsVersion="Current">
+  <ItemGroup>
+    <ProjectReference Include="AgentHello/AgentHello.csproj" />
+  </ItemGroup>
+  <Target Name="Restore">
+    <MSBuild Projects="@(ProjectReference)" Targets="Restore" />
+  </Target>
+  <Target Name="Build">
+    <MSBuild Projects="@(ProjectReference)" Targets="Build" />
+  </Target>
+</Project>

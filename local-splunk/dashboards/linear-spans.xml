@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<form version="1.1">
+  <label>AgentHello: Linear Spans</label>
+  <description>Master-detail view. Click a request row to select TraceId.</description>
+  <fieldset submitButton="false">
+    <input type="text" token="trace">
+      <label>TraceId</label>
+      <default>*</default>
+      <change>
+        <set token="trace_filter">TraceId="$value$"</set>
+        <set token="trace_value">$value$</set>
+      </change>
+    </input>
+    <input type="dropdown" token="ai_toggle">
+      <label>Show</label>
+      <choice value="all">All spans</choice>
+      <choice value="ai">AI only</choice>
+      <default>all</default>
+      <change>
+        <condition match="$value$=&quot;ai&quot;">
+          <set token="ai_filter">ai_provider=*</set>
+        </condition>
+        <condition match="$value$=&quot;all&quot;">
+          <unset token="ai_filter"/>
+        </condition>
+      </change>
+    </input>
+    <input type="time" token="time">
+      <label>Time Range</label>
+      <default>
+        <earliest>-1h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Requests (latest 100)</title>
+      <table>
+        <search>
+          <query>index=main sourcetype=_json source=AgentHello RequestPath=* | eval trace=coalesce(TraceId,'@tr',trace_id), span=coalesce(SpanId,'@sp',span_id) | stats latest(_time) as _time latest(RequestPath) as RequestPath latest(StatusCode) as StatusCode latest(span) as span by trace | sort - _time | head 100 | table _time trace span RequestPath StatusCode</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+        <option name="drilldown">row</option>
+        <drilldown>
+          <set token="trace">$row.trace$</set>
+          <set token="trace_filter">TraceId="$row.trace$" OR '@tr'="$row.trace$" OR trace_id="$row.trace$"</set>
+          <set token="trace_value">$row.trace$</set>
+        </drilldown>
+      </table>
+    </panel>
+    <panel>
+      <title>Linear history for $trace$</title>
+      <table>
+        <search>
+          <query>index=main sourcetype=_json source=AgentHello $ai_filter$ | eval tv="$trace_value$" | where (tv="" OR tv="*") OR (TraceId=tv OR '@tr'=tv OR trace_id=tv) | sort 0 _time | eval span=coalesce(SpanId,'@sp',span_id), parent=coalesce(ParentSpanId,ParentId,parent_span_id), ai=if(isnotnull(ai_provider),"AI","") | table _time SourceContext '@m' span parent RequestPath ai_provider ai_status_code ai Elapsed</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Span timeline (start/end) for $trace$</title>
+      <table>
+        <search>
+          <query>index=main sourcetype=_json source=AgentHello $ai_filter$ | eval tv="$trace_value$" | where (tv="" OR tv="*") OR (TraceId=tv OR '@tr'=tv OR trace_id=tv) | eval span=coalesce(SpanId,'@sp',span_id), parent=coalesce(ParentSpanId,ParentId,parent_span_id) | stats min(_time) as start max(_time) as end values(SourceContext) as source values(RequestPath) as route values(ai_provider) as ai_provider by span parent | eval duration=end-start | sort 0 start | table start end duration span parent source route ai_provider</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+      </table>
+    </panel>
+    <panel>
+      <title>Edges (parent → child) for $trace$</title>
+      <table>
+        <search>
+          <query>index=main sourcetype=_json source=AgentHello $ai_filter$ | eval tv="$trace_value$" | where (tv="" OR tv="*") OR (TraceId=tv OR '@tr'=tv OR trace_id=tv) | sort 0 _time | eval span=coalesce(SpanId,'@sp',span_id), parent=coalesce(ParentSpanId,ParentId,parent_span_id), edge=parent." → ".span | table _time edge SourceContext '@m' RequestPath ai_provider ai_status_code</query>
+          <earliest>$time.earliest$</earliest>
+          <latest>$time.latest$</latest>
+        </search>
+      </table>
+    </panel>
+  </row>
+</form>

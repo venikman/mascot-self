@@ -15,5 +15,9 @@ obj/
 *.suo
 
 # Logs
-*.log
+
 logs/
+
+appsettings.Production.json
+.claude
+.trae
